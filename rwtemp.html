@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Royal's War</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #1e1e2f;
+      color: #fff;
+      margin: 0;
+      padding: 0;
+    }
+
+    #game-container {
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+    }
+
+    #battlefield {
+      flex: 3;
+      background: #2d2d44;
+      padding: 20px;
+    }
+
+    #chat {
+      flex: 1;
+      border-left: 2px solid #444;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #chat-log {
+      flex: 1;
+      padding: 10px;
+      overflow-y: scroll;
+      background: #111;
+    }
+
+    #chat-input {
+      display: flex;
+      padding: 10px;
+      background: #222;
+    }
+
+    #chat-input input {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      outline: none;
+    }
+
+    #chat-input button {
+      padding: 8px 12px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+
+    .soldier {
+      display: inline-block;
+      width: 50px;
+      height: 50px;
+      background: red;
+      margin: 5px;
+      text-align: center;
+      line-height: 50px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <!-- Battlefield Section -->
+  <div id="battlefield">
+    <h2>Battlefield</h2>
+    <div id="my-soldiers">
+      <h3>Your Soldiers</h3>
+      <!-- Dynamically generated soldiers -->
+      <div class="soldier" onclick="attack('enemy1')">S1</div>
+      <div class="soldier" onclick="attack('enemy2')">S2</div>
+    </div>
+
+    <div id="enemy-soldiers">
+      <h3>Enemy Soldiers</h3>
+      <div class="soldier" style="background: blue;">E1</div>
+      <div class="soldier" style="background: blue;">E2</div>
+    </div>
+  </div>
+
+  <!-- Chat Section -->
+  <div id="chat">
+    <div id="chat-log"></div>
+    <div id="chat-input">
+      <input type="text" id="message" placeholder="Type your message..." />
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Placeholder chat logic
+  function sendMessage() {
+    const input = document.getElementById("message");
+    const msg = input.value.trim();
+    if (msg) {
+      const log = document.getElementById("chat-log");
+      const msgDiv = document.createElement("div");
+      msgDiv.textContent = "You: " + msg;
+      log.appendChild(msgDiv);
+      input.value = "";
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+
+  // Placeholder attack function
+  function attack(enemyId) {
+    alert(`You attacked ${enemyId}!`);
+    // In a real game, this would emit a socket event to the server
+  }
+</script>
+
+</body>
+</html>
