@@ -62,3 +62,23 @@ body {
     border-radius: 15%;
     border: 5px;
 }
+/* Might need edit*/
+.bmc-button {
+    background-color: #40DCA5;
+    color: #ffffff;
+    font-family: 'Lato', sans-serif;
+    padding: 8px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    margin-right: 10px;
+    font-weight: bold;
+    transition: background 0.2s;
+}
+.bmc-button:hover {
+    background-color: #36b98a;
+}
+.links {
+    display: flex;
+    align-items: center;
+    gap: 10px; /* Optional: adds space between the links */
+}
