@@ -3,7 +3,6 @@ html {
      font-weight: 450;
      font-style: normal;
     color: #000000;
-    background-color: rgb(200, 75, 255);
 }
  .navbar {
     position: fixed;
@@ -68,4 +67,11 @@ body {
     opacity: 0.75;
     border-radius: 15%;
     border: 5px;
+}
+.wrap {
+  white-space: normal;   /* allow wrapping at break points */
+  hyphens: none;         /* no hyphenation */
+  word-break: normal;    /* don't force mid-word break */
+  overflow-wrap: normal; /* let ZWS become breakpoints */
+  max-width: 100%;
 }
