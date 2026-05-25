@@ -54,7 +54,8 @@
   </main>
 
   <main id="app-screen" class="screen">
-    <aside class="left-rail">
+    <button id="sidebar-toggle" class="sidebar-toggle" type="button" onclick="toggleSidebar()">Menu</button>
+    <aside id="left-rail" class="left-rail">
       <a class="rail-brand" href="/index.html" aria-label="Go to Royal's Game home">
         <img src="/RGD-Logo.png" alt="Royal's Game Developers logo" />
       </a>
@@ -88,13 +89,22 @@
         </div>
         <div class="war-actions">
           <button id="next-day-btn" class="ghost-btn" type="button" onclick="advanceDay()" disabled>Next Day</button>
+          <button class="ghost-btn" type="button" onclick="toggleTutorial()">Tutorial</button>
           <button class="primary-btn" type="button" onclick="saveGame()">Save</button>
         </div>
       </header>
 
       <div class="war-layout">
         <section class="map-panel">
-          <div id="map-grid" class="map-grid"></div>
+          <div class="map-toolbar">
+            <button type="button" onclick="zoomMap(-0.15)">-</button>
+            <span id="zoom-label">100%</span>
+            <button type="button" onclick="zoomMap(0.15)">+</button>
+            <button type="button" onclick="resetMapView()">Reset</button>
+          </div>
+          <div id="map-viewport" class="map-viewport">
+            <div id="map-grid" class="map-grid"></div>
+          </div>
         </section>
 
         <aside class="war-panel">
@@ -107,6 +117,7 @@
             <div><span>Avg Power</span><strong id="stat-power">0</strong></div>
             <div><span>Land</span><strong id="stat-land">0</strong></div>
             <div><span>Day</span><strong id="stat-day">1</strong></div>
+            <div><span>Oil Levels</span><strong id="stat-oil">0</strong></div>
           </div>
 
           <div id="selected-state" class="selected-state"></div>
@@ -133,6 +144,14 @@
               <input id="rename-state-input" type="text" maxlength="28" placeholder="owned states only" />
             </label>
             <button type="button" onclick="renameSelectedState()">Rename Owned State</button>
+          </div>
+
+          <div class="control-block">
+            <h3>Oil Rig</h3>
+            <p id="oil-rig-info" class="hint-text">Select an owned state.</p>
+            <button type="button" onclick="buildOrUpgradeOilRig()">Build / Upgrade Oil Rig</button>
+            <button type="button" onclick="collectOilIncome()">Collect Oil Income</button>
+            <button type="button" onclick="maintainOilRigs()">Maintain Oil Rigs $100</button>
           </div>
 
           <div class="control-block">
@@ -170,13 +189,13 @@
             <label>Offer water <input id="offer-water" type="number" min="0" value="0" /></label>
             <label>Offer soldiers <input id="offer-soldiers" type="number" min="0" value="0" /></label>
             <label>Offer population <input id="offer-population" type="number" min="0" value="0" /></label>
-            <label>Offer land <select id="offer-land"></select></label>
+            <label>Offer oil rig levels <input id="offer-oil-rigs" type="number" min="0" value="0" /></label>
             <label>Ask money <input id="ask-money" type="number" min="0" value="0" /></label>
             <label>Ask food <input id="ask-food" type="number" min="0" value="0" /></label>
             <label>Ask water <input id="ask-water" type="number" min="0" value="0" /></label>
             <label>Ask soldiers <input id="ask-soldiers" type="number" min="0" value="0" /></label>
             <label>Ask population <input id="ask-population" type="number" min="0" value="0" /></label>
-            <label>Ask land name <input id="ask-land" type="text" placeholder="state name or blank" /></label>
+            <label>Ask oil rig levels <input id="ask-oil-rigs" type="number" min="0" value="0" /></label>
           </div>
           <button class="primary-btn" type="button" onclick="createTradeOffer()">Send Trade Offer</button>
         </div>
@@ -188,6 +207,20 @@
       </section>
     </section>
   </main>
+
+  <section id="tutorial-modal" class="tutorial-modal hidden">
+    <div class="tutorial-card">
+      <button class="close-tutorial" type="button" onclick="toggleTutorial()">Close</button>
+      <h2>Royal's War Tutorial</h2>
+      <p><strong>Chat:</strong> use Global Chat to talk with online players. You can delete your own messages.</p>
+      <p><strong>Map:</strong> drag the map to move around and use the zoom buttons or mouse wheel to zoom. Click a state to inspect it.</p>
+      <p><strong>Land:</strong> attack enemy states with soldiers. Winning captures the state and its resources.</p>
+      <p><strong>Days:</strong> one day lasts 12 hours. You can manually advance after 6 hours. Population may grow, food/water are consumed, and there is a 1% chance one person joins your soldiers.</p>
+      <p><strong>Oil rigs:</strong> build for $1000, upgrade for $500 up to level 5. Each level pays $10 every random 35-70 minutes, with offline income capped at 50 hours.</p>
+      <p><strong>Maintenance:</strong> oil rigs need $100 maintenance every 7 days. If overdue, every harvest can fail. Failure starts at 10% and rises by 2% each overdue harvest attempt until you maintain the rigs.</p>
+      <p><strong>Trading:</strong> trade money, food, water, soldiers, population, and oil-rig levels with other players.</p>
+    </div>
+  </section>
 
   <script type="module" src="app.js"></script>
 </body>

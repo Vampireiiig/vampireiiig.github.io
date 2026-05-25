@@ -35,6 +35,10 @@ create table players (
   soldier_power numeric default 1,
   day integer default 1,
   last_day_at timestamp default now(),
+  last_oil_collected_at timestamp default now(),
+  oil_cycle_minutes integer default 50,
+  last_oil_maintenance_at timestamp default now(),
+  oil_failure_chance numeric default 0.10,
   updated_at timestamp default now()
 );
 
@@ -47,7 +51,8 @@ create table states (
   soldier_power numeric not null,
   money numeric not null,
   food numeric not null,
-  water numeric not null
+  water numeric not null,
+  natural_oil_level integer default 0
 );
 
 create table player_states (
@@ -55,6 +60,7 @@ create table player_states (
   state_id text references states(id) not null,
   soldiers integer default 0,
   custom_name text,
+  oil_rig_level integer default 0,
   primary key (player_id, state_id)
 );
 
@@ -78,16 +84,25 @@ create table trade_offers (
   created_at timestamp default now()
 );
 
-insert into states (id, name, x, y, soldiers, soldier_power, money, food, water) values
-  ('northwatch', 'Northwatch', 1, 1, 7, 2, 60, 90, 70),
-  ('ironfield', 'Ironfield', 2, 1, 10, 2, 110, 80, 55),
-  ('sunford', 'Sunford', 3, 1, 14, 3, 130, 120, 90),
-  ('greenbay', 'Greenbay', 1, 2, 6, 1, 70, 160, 120),
-  ('crownmere', 'Crownmere', 2, 2, 18, 4, 220, 150, 150),
-  ('eastvale', 'Eastvale', 3, 2, 9, 2, 90, 80, 130),
-  ('stonepass', 'Stonepass', 1, 3, 12, 3, 100, 65, 80),
-  ('riverhold', 'Riverhold', 2, 3, 8, 2, 85, 140, 170),
-  ('ashridge', 'Ashridge', 3, 3, 16, 4, 190, 100, 90);
+insert into states (id, name, x, y, soldiers, soldier_power, money, food, water, natural_oil_level) values
+  ('northwatch', 'Northwatch', 1, 1, 7, 2, 60, 90, 70, 0),
+  ('ironfield', 'Ironfield', 2, 1, 10, 2, 110, 80, 55, 1),
+  ('sunford', 'Sunford', 3, 1, 14, 3, 130, 120, 90, 0),
+  ('greenbay', 'Greenbay', 1, 2, 6, 1, 70, 160, 120, 0),
+  ('crownmere', 'Crownmere', 2, 2, 18, 4, 220, 150, 150, 2),
+  ('eastvale', 'Eastvale', 3, 2, 9, 2, 90, 80, 130, 0),
+  ('stonepass', 'Stonepass', 1, 3, 12, 3, 100, 65, 80, 1),
+  ('riverhold', 'Riverhold', 2, 3, 8, 2, 85, 140, 170, 0),
+  ('ashridge', 'Ashridge', 3, 3, 16, 4, 190, 100, 90, 2),
+  ('redmesa', 'Redmesa', 4, 1, 19, 4, 230, 120, 70, 3),
+  ('frostgate', 'Frostgate', 5, 1, 11, 3, 120, 75, 95, 0),
+  ('saltmarsh', 'Saltmarsh', 6, 1, 13, 3, 160, 95, 190, 1),
+  ('blackport', 'Blackport', 4, 2, 21, 5, 270, 130, 110, 2),
+  ('silverrun', 'Silverrun', 5, 2, 15, 3, 190, 180, 120, 0),
+  ('dunewatch', 'Dunewatch', 6, 2, 17, 4, 210, 80, 65, 3),
+  ('wolfpine', 'Wolfpine', 4, 3, 12, 2, 140, 210, 100, 0),
+  ('stormfen', 'Stormfen', 5, 3, 20, 5, 260, 140, 180, 1),
+  ('goldcliff', 'Goldcliff', 6, 3, 24, 6, 340, 160, 130, 2);
 
 alter table profiles enable row level security;
 alter table messages enable row level security;
@@ -139,9 +154,8 @@ declare
   receiver_id uuid;
   giver players%rowtype;
   receiver players%rowtype;
-  offer_land text;
-  request_land text;
-  request_land_id text;
+  offer_oil integer;
+  request_oil integer;
 begin
   select * into t from trade_offers where id = trade_id for update;
   if not found then
@@ -176,25 +190,15 @@ begin
     raise exception 'You do not own enough resources';
   end if;
 
-  offer_land := nullif(t.offer->>'land', '');
-  if offer_land is not null and not exists (
-    select 1 from player_states where player_id = t.from_player and state_id = offer_land
-  ) then
-    raise exception 'Offering player no longer owns offered land';
+  offer_oil := coalesce((t.offer->>'oil_rigs')::integer, 0);
+  request_oil := coalesce((t.request->>'oil_rigs')::integer, 0);
+
+  if offer_oil > coalesce((select sum(oil_rig_level) from player_states where player_id = t.from_player), 0) then
+    raise exception 'Offering player does not own enough oil rig levels';
   end if;
 
-  request_land := nullif(t.request->>'land', '');
-  if request_land is not null then
-    select ps.state_id into request_land_id
-    from player_states ps
-    join states s on s.id = ps.state_id
-    where ps.player_id = receiver_id
-      and lower(coalesce(ps.custom_name, s.name, ps.state_id)) = lower(request_land)
-    limit 1;
-
-    if request_land_id is null then
-      raise exception 'You do not own the requested land';
-    end if;
+  if request_oil > coalesce((select sum(oil_rig_level) from player_states where player_id = receiver_id), 0) then
+    raise exception 'You do not own enough oil rig levels';
   end if;
 
   update players set
@@ -215,18 +219,61 @@ begin
     updated_at = now()
   where id = receiver_id;
 
-  if offer_land is not null then
-    update player_states
-    set player_id = receiver_id
-    where player_id = t.from_player and state_id = offer_land;
-  end if;
-
-  if request_land_id is not null then
-    update player_states
-    set player_id = t.from_player
-    where player_id = receiver_id and state_id = request_land_id;
-  end if;
+  perform move_oil_rig_levels(t.from_player, receiver_id, offer_oil);
+  perform move_oil_rig_levels(receiver_id, t.from_player, request_oil);
 
   update trade_offers set status = 'accepted' where id = trade_id;
+end;
+$$;
+
+create or replace function move_oil_rig_levels(from_id uuid, to_id uuid, level_count integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  remaining integer := coalesce(level_count, 0);
+  row_data record;
+  take_levels integer;
+  add_levels integer;
+begin
+  if remaining <= 0 then
+    return;
+  end if;
+
+  for row_data in
+    select * from player_states
+    where player_id = from_id and oil_rig_level > 0
+    order by oil_rig_level desc
+  loop
+    exit when remaining <= 0;
+    take_levels := least(row_data.oil_rig_level, remaining);
+    update player_states
+    set oil_rig_level = oil_rig_level - take_levels
+    where player_id = from_id and state_id = row_data.state_id;
+    remaining := remaining - take_levels;
+  end loop;
+
+  remaining := coalesce(level_count, 0);
+
+  for row_data in
+    select * from player_states
+    where player_id = to_id
+    order by oil_rig_level asc
+  loop
+    exit when remaining <= 0;
+    add_levels := least(5 - row_data.oil_rig_level, remaining);
+    if add_levels > 0 then
+      update player_states
+      set oil_rig_level = oil_rig_level + add_levels
+      where player_id = to_id and state_id = row_data.state_id;
+      remaining := remaining - add_levels;
+    end if;
+  end loop;
+
+  if remaining > 0 then
+    raise exception 'Receiving player has no space for oil rig levels';
+  end if;
 end;
 $$;

@@ -20,21 +20,32 @@ let presenceChannel = null;
 let messageChannel = null;
 let dayTimer = null;
 let pendingUsername = null;
+let mapView = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
 
 const DAY_LENGTH_MS = 12 * 60 * 60 * 1000;
 const NEXT_DAY_UNLOCK_MS = 6 * 60 * 60 * 1000;
-const MAP_WIDTH = 30;
-const MAP_HEIGHT = 20;
+const MAINTENANCE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAP_WIDTH = 48;
+const MAP_HEIGHT = 32;
 const FALLBACK_STATES = [
-  { id: "northwatch", name: "Northwatch", x: 1, y: 1, soldiers: 7, soldier_power: 2, money: 60, food: 90, water: 70 },
-  { id: "ironfield", name: "Ironfield", x: 2, y: 1, soldiers: 10, soldier_power: 2, money: 110, food: 80, water: 55 },
-  { id: "sunford", name: "Sunford", x: 3, y: 1, soldiers: 14, soldier_power: 3, money: 130, food: 120, water: 90 },
-  { id: "greenbay", name: "Greenbay", x: 1, y: 2, soldiers: 6, soldier_power: 1, money: 70, food: 160, water: 120 },
-  { id: "crownmere", name: "Crownmere", x: 2, y: 2, soldiers: 18, soldier_power: 4, money: 220, food: 150, water: 150 },
-  { id: "eastvale", name: "Eastvale", x: 3, y: 2, soldiers: 9, soldier_power: 2, money: 90, food: 80, water: 130 },
-  { id: "stonepass", name: "Stonepass", x: 1, y: 3, soldiers: 12, soldier_power: 3, money: 100, food: 65, water: 80 },
-  { id: "riverhold", name: "Riverhold", x: 2, y: 3, soldiers: 8, soldier_power: 2, money: 85, food: 140, water: 170 },
-  { id: "ashridge", name: "Ashridge", x: 3, y: 3, soldiers: 16, soldier_power: 4, money: 190, food: 100, water: 90 },
+  { id: "northwatch", name: "Northwatch", x: 1, y: 1, soldiers: 7, soldier_power: 2, money: 60, food: 90, water: 70, natural_oil_level: 0 },
+  { id: "ironfield", name: "Ironfield", x: 2, y: 1, soldiers: 10, soldier_power: 2, money: 110, food: 80, water: 55, natural_oil_level: 1 },
+  { id: "sunford", name: "Sunford", x: 3, y: 1, soldiers: 14, soldier_power: 3, money: 130, food: 120, water: 90, natural_oil_level: 0 },
+  { id: "greenbay", name: "Greenbay", x: 1, y: 2, soldiers: 6, soldier_power: 1, money: 70, food: 160, water: 120, natural_oil_level: 0 },
+  { id: "crownmere", name: "Crownmere", x: 2, y: 2, soldiers: 18, soldier_power: 4, money: 220, food: 150, water: 150, natural_oil_level: 2 },
+  { id: "eastvale", name: "Eastvale", x: 3, y: 2, soldiers: 9, soldier_power: 2, money: 90, food: 80, water: 130, natural_oil_level: 0 },
+  { id: "stonepass", name: "Stonepass", x: 1, y: 3, soldiers: 12, soldier_power: 3, money: 100, food: 65, water: 80, natural_oil_level: 1 },
+  { id: "riverhold", name: "Riverhold", x: 2, y: 3, soldiers: 8, soldier_power: 2, money: 85, food: 140, water: 170, natural_oil_level: 0 },
+  { id: "ashridge", name: "Ashridge", x: 3, y: 3, soldiers: 16, soldier_power: 4, money: 190, food: 100, water: 90, natural_oil_level: 2 },
+  { id: "redmesa", name: "Redmesa", x: 4, y: 1, soldiers: 19, soldier_power: 4, money: 230, food: 120, water: 70, natural_oil_level: 3 },
+  { id: "frostgate", name: "Frostgate", x: 5, y: 1, soldiers: 11, soldier_power: 3, money: 120, food: 75, water: 95, natural_oil_level: 0 },
+  { id: "saltmarsh", name: "Saltmarsh", x: 6, y: 1, soldiers: 13, soldier_power: 3, money: 160, food: 95, water: 190, natural_oil_level: 1 },
+  { id: "blackport", name: "Blackport", x: 4, y: 2, soldiers: 21, soldier_power: 5, money: 270, food: 130, water: 110, natural_oil_level: 2 },
+  { id: "silverrun", name: "Silverrun", x: 5, y: 2, soldiers: 15, soldier_power: 3, money: 190, food: 180, water: 120, natural_oil_level: 0 },
+  { id: "dunewatch", name: "Dunewatch", x: 6, y: 2, soldiers: 17, soldier_power: 4, money: 210, food: 80, water: 65, natural_oil_level: 3 },
+  { id: "wolfpine", name: "Wolfpine", x: 4, y: 3, soldiers: 12, soldier_power: 2, money: 140, food: 210, water: 100, natural_oil_level: 0 },
+  { id: "stormfen", name: "Stormfen", x: 5, y: 3, soldiers: 20, soldier_power: 5, money: 260, food: 140, water: 180, natural_oil_level: 1 },
+  { id: "goldcliff", name: "Goldcliff", x: 6, y: 3, soldiers: 24, soldier_power: 6, money: 340, food: 160, water: 130, natural_oil_level: 2 },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -52,6 +63,14 @@ window.setView = function(view) {
   $("view-chat").classList.toggle("active", view === "chat");
   $("view-war").classList.toggle("active", view === "war");
   if (view === "war") refreshGame();
+};
+
+window.toggleSidebar = function() {
+  $("app-screen").classList.toggle("sidebar-collapsed");
+};
+
+window.toggleTutorial = function() {
+  $("tutorial-modal").classList.toggle("hidden");
 };
 
 window.handleLogin = async function() {
@@ -365,6 +384,10 @@ async function loadOrCreatePlayer() {
       soldier_power: 1,
       day: 1,
       last_day_at: new Date().toISOString(),
+      last_oil_collected_at: new Date().toISOString(),
+      oil_cycle_minutes: randomOilCycleMinutes(),
+      last_oil_maintenance_at: new Date().toISOString(),
+      oil_failure_chance: 0.10,
     })
     .select()
     .single();
@@ -377,6 +400,7 @@ async function loadOrCreatePlayer() {
       player_id: sessionUser.id,
       state_id: starterState.id,
       soldiers: 3,
+      oil_rig_level: Number(starterState.natural_oil_level) || 0,
     });
     selectedStateId = starterState.id;
   }
@@ -417,6 +441,7 @@ async function refreshGame() {
   renderTradeControls();
   renderTradeOffers();
   updateNextDayButton();
+  setupMapInteractions();
 }
 
 function renderStats() {
@@ -429,6 +454,7 @@ function renderStats() {
   $("stat-power").textContent = Number(currentPlayer.soldier_power).toFixed(1);
   $("stat-land").textContent = land;
   $("stat-day").textContent = currentPlayer.day;
+  $("stat-oil").textContent = getTotalOilLevels();
   $("war-status").textContent = `${currentUser}'s kingdom controls ${land} state${land === 1 ? "" : "s"}.`;
 }
 
@@ -440,6 +466,8 @@ function renderMap() {
     const state = allStates.find((item) => item.id === cell.stateId);
     if (!state) return;
     const owned = ownedIds.has(state.id);
+    const ownedState = getOwnedState(state.id);
+    const oilLevel = ownedState?.oil_rig_level || state.natural_oil_level || 0;
     const tile = document.createElement("button");
     tile.type = "button";
     tile.className = [
@@ -451,10 +479,12 @@ function renderMap() {
       cell.edges.bottom ? "edge-bottom" : "",
       cell.edges.left ? "edge-left" : "",
       cell.capital ? "capital" : "",
+      oilLevel ? "oil" : "",
     ].join(" ");
     tile.style.backgroundColor = owned ? cell.ownedColor : cell.enemyColor;
-    tile.title = getStateDisplayName(state);
-    if (cell.capital) tile.dataset.label = getStateDisplayName(state);
+    tile.title = `${getStateDisplayName(state)} | Soldiers: ${owned ? ownedState?.soldiers || 0 : state.soldiers} | Power: ${Number(state.soldier_power).toFixed(1)} | Oil: ${oilLevel}`;
+    if (cell.capital) tile.dataset.label = `${getStateDisplayName(state)} S:${owned ? ownedState?.soldiers || 0 : state.soldiers} O:${oilLevel}`;
+    if (oilLevel) tile.dataset.oil = oilLevel;
     tile.onclick = () => {
       selectedStateId = state.id;
       renderMap();
@@ -470,11 +500,16 @@ function renderSelectedState() {
 
   const owned = getOwnedState(state.id);
   $("rename-state-input").value = owned?.custom_name || "";
+  $("oil-rig-info").textContent = owned
+    ? `Level ${owned.oil_rig_level || 0}/5. Generates $${(owned.oil_rig_level || 0) * 10} every ${currentPlayer.oil_cycle_minutes || 50} minutes. Maintenance: ${getMaintenanceStatusText()}.`
+    : `Enemy land. Natural oil level: ${state.natural_oil_level || 0}.`;
   $("selected-state").innerHTML = `
     <h3>${escapeHTML(getStateDisplayName(state))}</h3>
     <p>${owned ? "You own this state." : "Enemy territory."}</p>
     <p>Soldiers here: ${owned ? owned.soldiers : state.soldiers}</p>
     <p>Soldier power: ${Number(state.soldier_power).toFixed(1)}</p>
+    <p>Oil rig level: ${owned ? owned.oil_rig_level || 0 : state.natural_oil_level || 0}</p>
+    <p>Resources: $${state.money}, ${state.food} food, ${state.water} water</p>
   `;
 }
 
@@ -512,6 +547,76 @@ window.sellResource = async function(type) {
     money: Number(currentPlayer.money) + 20,
   });
   addLog(`Sold 50 ${type} for $20.`);
+};
+
+window.buildOrUpgradeOilRig = async function() {
+  const state = getSelectedState();
+  const owned = state ? getOwnedState(state.id) : null;
+  if (!state || !owned) return addLog("Select one of your own states first.");
+
+  const level = owned.oil_rig_level || 0;
+  if (level >= 5) return addLog("This oil rig is already level 5.");
+
+  const cost = level === 0 ? 1000 : 500;
+  if (Number(currentPlayer.money) < cost) return addLog(`You need $${cost} for this.`);
+
+  const { error } = await supabase
+    .from("player_states")
+    .update({ oil_rig_level: level + 1 })
+    .eq("player_id", sessionUser.id)
+    .eq("state_id", state.id);
+
+  if (error) return console.error(error);
+
+  await updatePlayer({ money: Number(currentPlayer.money) - cost });
+  addLog(`${getStateDisplayName(state)} oil rig is now level ${level + 1}.`);
+};
+
+window.collectOilIncome = async function() {
+  const income = calculateOilIncome();
+  if (income <= 0) return addLog("No oil income ready yet.");
+
+  if (isOilMaintenanceOverdue()) {
+    const chance = Number(currentPlayer.oil_failure_chance ?? 0.10);
+    if (Math.random() < chance) {
+      await updatePlayer({
+        last_oil_collected_at: new Date().toISOString(),
+        oil_cycle_minutes: randomOilCycleMinutes(),
+        oil_failure_chance: Math.min(0.95, chance + 0.02),
+      });
+      addLog(`Oil rigs failed due to overdue maintenance. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
+      return;
+    }
+
+    await updatePlayer({
+      money: Number(currentPlayer.money) + income,
+      last_oil_collected_at: new Date().toISOString(),
+      oil_cycle_minutes: randomOilCycleMinutes(),
+      oil_failure_chance: Math.min(0.95, chance + 0.02),
+    });
+    addLog(`Collected $${income}, but maintenance is overdue. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
+    return;
+  }
+
+  await updatePlayer({
+    money: Number(currentPlayer.money) + income,
+    last_oil_collected_at: new Date().toISOString(),
+    oil_cycle_minutes: randomOilCycleMinutes(),
+    oil_failure_chance: 0.10,
+  });
+  addLog(`Collected $${income} from oil rigs.`);
+};
+
+window.maintainOilRigs = async function() {
+  if (getTotalOilLevels() <= 0) return addLog("You do not own any oil rigs yet.");
+  if (Number(currentPlayer.money) < 100) return addLog("You need $100 for oil rig maintenance.");
+
+  await updatePlayer({
+    money: Number(currentPlayer.money) - 100,
+    last_oil_maintenance_at: new Date().toISOString(),
+    oil_failure_chance: 0.10,
+  });
+  addLog("Oil rigs maintained. Failure chance reset to 10% if maintenance becomes overdue again.");
 };
 
 window.advanceDay = async function() {
@@ -578,6 +683,7 @@ window.attackSelectedState = async function() {
       player_id: sessionUser.id,
       state_id: state.id,
       soldiers: Math.max(1, result.attackerRemaining),
+      oil_rig_level: Number(state.natural_oil_level) || 0,
     });
   }
 
@@ -667,16 +773,6 @@ function renderTradeControls() {
     playerSelect.appendChild(option);
   });
 
-  const landSelect = $("offer-land");
-  landSelect.innerHTML = `<option value="">No land</option>`;
-  ownedStates.forEach((owned) => {
-    const state = allStates.find((item) => item.id === owned.state_id);
-    if (!state) return;
-    const option = document.createElement("option");
-    option.value = state.id;
-    option.textContent = getStateDisplayName(state);
-    landSelect.appendChild(option);
-  });
 }
 
 function renderTradeOffers() {
@@ -709,19 +805,18 @@ function renderTradeOffers() {
 }
 
 function readTradeSide(prefix) {
-  const landValue = prefix === "offer" ? $("offer-land").value : $("ask-land").value.trim();
   return {
     money: clampNumber($(`${prefix}-money`).value, 0, 1000000),
     food: clampNumber($(`${prefix}-food`).value, 0, 1000000),
     water: clampNumber($(`${prefix}-water`).value, 0, 1000000),
     soldiers: clampNumber($(`${prefix}-soldiers`).value, 0, 1000000),
     population: clampNumber($(`${prefix}-population`).value, 0, 1000000),
-    land: landValue || "",
+    oil_rigs: clampNumber($(`${prefix}-oil-rigs`).value, 0, 1000000),
   };
 }
 
 function hasTradeValue(side) {
-  return side.money || side.food || side.water || side.soldiers || side.population || side.land;
+  return side.money || side.food || side.water || side.soldiers || side.population || side.oil_rigs;
 }
 
 function canAffordTradeSide(side, player) {
@@ -729,7 +824,8 @@ function canAffordTradeSide(side, player) {
     side.food <= Number(player.food) &&
     side.water <= Number(player.water) &&
     side.soldiers <= Number(player.soldiers) &&
-    side.population <= Number(player.population);
+    side.population <= Number(player.population) &&
+    side.oil_rigs <= getTotalOilLevels();
 }
 
 function formatTradeSide(side) {
@@ -737,16 +833,117 @@ function formatTradeSide(side) {
   ["money", "food", "water", "soldiers", "population"].forEach((key) => {
     if (Number(side?.[key]) > 0) parts.push(`${side[key]} ${key}`);
   });
-  if (side?.land) parts.push(`land: ${side.land}`);
+  if (Number(side?.oil_rigs) > 0) parts.push(`${side.oil_rigs} oil rig level${Number(side.oil_rigs) === 1 ? "" : "s"}`);
   return parts.length ? parts.join(", ") : "nothing";
 }
 
 function clearTradeForm() {
-  ["offer-money", "offer-food", "offer-water", "offer-soldiers", "offer-population", "ask-money", "ask-food", "ask-water", "ask-soldiers", "ask-population"].forEach((id) => {
+  ["offer-money", "offer-food", "offer-water", "offer-soldiers", "offer-population", "offer-oil-rigs", "ask-money", "ask-food", "ask-water", "ask-soldiers", "ask-population", "ask-oil-rigs"].forEach((id) => {
     $(id).value = 0;
   });
-  $("offer-land").value = "";
-  $("ask-land").value = "";
+}
+
+function getTotalOilLevels() {
+  return ownedStates.reduce((total, state) => total + Number(state.oil_rig_level || 0), 0);
+}
+
+function calculateOilIncome() {
+  const oilLevels = getTotalOilLevels();
+  if (!oilLevels) return 0;
+
+  const lastCollected = currentPlayer?.last_oil_collected_at
+    ? new Date(currentPlayer.last_oil_collected_at).getTime()
+    : Date.now();
+  const elapsedMinutes = Math.min(50 * 60, Math.max(0, (Date.now() - lastCollected) / 60000));
+  const cycleMinutes = Number(currentPlayer?.oil_cycle_minutes) || 50;
+  const completedCycles = Math.floor(elapsedMinutes / cycleMinutes);
+  return oilLevels * 10 * completedCycles;
+}
+
+function randomOilCycleMinutes() {
+  return Math.floor(35 + Math.random() * 36);
+}
+
+function isOilMaintenanceOverdue() {
+  if (getTotalOilLevels() <= 0) return false;
+  const maintainedAt = currentPlayer?.last_oil_maintenance_at
+    ? new Date(currentPlayer.last_oil_maintenance_at).getTime()
+    : 0;
+  return Date.now() - maintainedAt > MAINTENANCE_MS;
+}
+
+function getMaintenanceStatusText() {
+  if (getTotalOilLevels() <= 0) return "no rigs";
+  const maintainedAt = currentPlayer?.last_oil_maintenance_at
+    ? new Date(currentPlayer.last_oil_maintenance_at).getTime()
+    : Date.now();
+  const remaining = MAINTENANCE_MS - (Date.now() - maintainedAt);
+  if (remaining <= 0) {
+    return `overdue, ${Math.round(Number(currentPlayer.oil_failure_chance ?? 0.10) * 100)}% fail chance`;
+  }
+  return `due in ${formatDuration(remaining)}`;
+}
+
+window.zoomMap = function(delta) {
+  mapView.scale = Math.max(0.45, Math.min(2.3, mapView.scale + delta));
+  applyMapTransform();
+};
+
+window.resetMapView = function() {
+  mapView = { ...mapView, scale: 1, x: 0, y: 0, dragging: false };
+  applyMapTransform();
+};
+
+function setupMapInteractions() {
+  const viewport = $("map-viewport");
+  if (!viewport || viewport.dataset.ready) return;
+  viewport.dataset.ready = "true";
+
+  viewport.addEventListener("pointerdown", (event) => {
+    mapView.dragging = true;
+    mapView.startX = event.clientX;
+    mapView.startY = event.clientY;
+    mapView.originX = mapView.x;
+    mapView.originY = mapView.y;
+    viewport.classList.add("dragging");
+    viewport.setPointerCapture(event.pointerId);
+  });
+
+  viewport.addEventListener("pointermove", (event) => {
+    if (!mapView.dragging) return;
+    mapView.x = mapView.originX + event.clientX - mapView.startX;
+    mapView.y = mapView.originY + event.clientY - mapView.startY;
+    applyMapTransform();
+  });
+
+  viewport.addEventListener("pointerup", (event) => {
+    mapView.dragging = false;
+    viewport.classList.remove("dragging");
+    viewport.releasePointerCapture(event.pointerId);
+  });
+
+  viewport.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const oldScale = mapView.scale;
+    const delta = event.deltaY > 0 ? -0.1 : 0.1;
+    mapView.scale = Math.max(0.45, Math.min(2.3, mapView.scale + delta));
+    const rect = viewport.getBoundingClientRect();
+    const mx = event.clientX - rect.left;
+    const my = event.clientY - rect.top;
+    const factor = mapView.scale / oldScale;
+    mapView.x = mx - (mx - mapView.x) * factor;
+    mapView.y = my - (my - mapView.y) * factor;
+    applyMapTransform();
+  }, { passive: false });
+
+  applyMapTransform();
+}
+
+function applyMapTransform() {
+  const grid = $("map-grid");
+  if (!grid) return;
+  grid.style.transform = `translate(${mapView.x}px, ${mapView.y}px) scale(${mapView.scale})`;
+  $("zoom-label").textContent = `${Math.round(mapView.scale * 100)}%`;
 }
 
 async function updatePlayer(patch) {
@@ -805,12 +1002,14 @@ function makeSoldiers(count, power) {
 }
 
 function buildMapCells() {
+  const maxStateX = Math.max(...allStates.map((state) => Number(state.x) || 1), 1);
+  const maxStateY = Math.max(...allStates.map((state) => Number(state.y) || 1), 1);
   const seeds = allStates.map((state, index) => {
     const rng = seededRandom(hashString(state.id));
     return {
       stateId: state.id,
-      x: Math.floor(((state.x - 0.5) / 3) * MAP_WIDTH + (rng() - 0.5) * 3),
-      y: Math.floor(((state.y - 0.5) / 3) * MAP_HEIGHT + (rng() - 0.5) * 3),
+      x: Math.floor(((state.x - 0.5) / maxStateX) * MAP_WIDTH + (rng() - 0.5) * 4),
+      y: Math.floor(((state.y - 0.5) / maxStateY) * MAP_HEIGHT + (rng() - 0.5) * 4),
       index,
     };
   });
@@ -926,6 +1125,9 @@ function formatDuration(ms) {
   const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
+  const days = Math.floor(hours / 24);
+  const hourRemainder = hours % 24;
+  if (days > 0) return `${days}d ${hourRemainder}h`;
   if (hours <= 0) return `${minutes}m`;
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
