@@ -117,7 +117,7 @@
             <div><span>Avg Power</span><strong id="stat-power">0</strong></div>
             <div><span>Land</span><strong id="stat-land">0</strong></div>
             <div><span>Day</span><strong id="stat-day">1</strong></div>
-            <div><span>Oil Levels</span><strong id="stat-oil">0</strong></div>
+            <div><span>Oil Rigs</span><strong id="stat-oil">0</strong></div>
           </div>
 
           <div id="selected-state" class="selected-state"></div>
@@ -149,9 +149,22 @@
           <div class="control-block">
             <h3>Oil Rig</h3>
             <p id="oil-rig-info" class="hint-text">Select an owned state.</p>
-            <button type="button" onclick="buildOrUpgradeOilRig()">Build / Upgrade Oil Rig</button>
-            <button type="button" onclick="collectOilIncome()">Collect Oil Income</button>
+            <button type="button" onclick="beginPlaceRigMode()">Place New Oil Rig $1000</button>
+            <button type="button" onclick="upgradeSelectedRig()">Upgrade Selected Rig $500</button>
             <button type="button" onclick="maintainOilRigs()">Maintain Oil Rigs $100</button>
+          </div>
+
+          <div class="control-block">
+            <h3>State Borders</h3>
+            <p id="border-mode-info" class="hint-text">Select an owned state, then edit its borders tile by tile.</p>
+            <button type="button" onclick="toggleBorderEditMode()">Toggle Border Edit</button>
+            <button type="button" onclick="assignSelectedTilesToCurrentState()">Move Selected Tiles Here</button>
+            <label>
+              New state name
+              <input id="new-state-name" type="text" maxlength="28" placeholder="new district name" />
+            </label>
+            <button type="button" onclick="createStateFromSelection()">Create State From Selected Tiles</button>
+            <button type="button" onclick="clearTileSelection()">Clear Tile Selection</button>
           </div>
 
           <div class="control-block">
@@ -189,13 +202,13 @@
             <label>Offer water <input id="offer-water" type="number" min="0" value="0" /></label>
             <label>Offer soldiers <input id="offer-soldiers" type="number" min="0" value="0" /></label>
             <label>Offer population <input id="offer-population" type="number" min="0" value="0" /></label>
-            <label>Offer oil rig levels <input id="offer-oil-rigs" type="number" min="0" value="0" /></label>
+            <label>Offer oil rigs <input id="offer-oil-rigs" type="number" min="0" value="0" /></label>
             <label>Ask money <input id="ask-money" type="number" min="0" value="0" /></label>
             <label>Ask food <input id="ask-food" type="number" min="0" value="0" /></label>
             <label>Ask water <input id="ask-water" type="number" min="0" value="0" /></label>
             <label>Ask soldiers <input id="ask-soldiers" type="number" min="0" value="0" /></label>
             <label>Ask population <input id="ask-population" type="number" min="0" value="0" /></label>
-            <label>Ask oil rig levels <input id="ask-oil-rigs" type="number" min="0" value="0" /></label>
+            <label>Ask oil rigs <input id="ask-oil-rigs" type="number" min="0" value="0" /></label>
           </div>
           <button class="primary-btn" type="button" onclick="createTradeOffer()">Send Trade Offer</button>
         </div>
@@ -218,7 +231,7 @@
       <p><strong>Days:</strong> one day lasts 12 hours. You can manually advance after 6 hours. Population may grow, food/water are consumed, and there is a 1% chance one person joins your soldiers.</p>
       <p><strong>Oil rigs:</strong> build for $1000, upgrade for $500 up to level 5. Each level pays $10 every random 35-70 minutes, with offline income capped at 50 hours.</p>
       <p><strong>Maintenance:</strong> oil rigs need $100 maintenance every 7 days. If overdue, every harvest can fail. Failure starts at 10% and rises by 2% each overdue harvest attempt until you maintain the rigs.</p>
-      <p><strong>Trading:</strong> trade money, food, water, soldiers, population, and oil-rig levels with other players.</p>
+      <p><strong>Trading:</strong> trade money, food, water, soldiers, population, and oil rigs with other players.</p>
     </div>
   </section>
 

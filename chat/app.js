@@ -9,12 +9,17 @@ const fakeEmail = (username) => `${username.toLowerCase()}@rgd.chat`;
 
 let sessionUser = null;
 let currentUser = null;
+let currentProfile = null;
 let currentPlayer = null;
 let allStates = [];
 let ownedStates = [];
 let allPlayers = [];
 let tradeOffers = [];
 let mapCells = [];
+let mapCellByKey = new Map();
+let selectedTileKeys = new Set();
+let interactionMode = "normal";
+let selectedRigId = null;
 let selectedStateId = null;
 let presenceChannel = null;
 let messageChannel = null;
@@ -25,8 +30,11 @@ let mapView = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, ori
 const DAY_LENGTH_MS = 12 * 60 * 60 * 1000;
 const NEXT_DAY_UNLOCK_MS = 6 * 60 * 60 * 1000;
 const MAINTENANCE_MS = 7 * 24 * 60 * 60 * 1000;
-const MAP_WIDTH = 48;
-const MAP_HEIGHT = 32;
+const MAP_WIDTH = 96;
+const MAP_HEIGHT = 64;
+const MUTE_MESSAGE = "I have previously said things which I now regret. Now I ponder in silence.";
+const MUTE_MS = 24 * 60 * 60 * 1000;
+const MUTE_MESSAGE_COOLDOWN_MS = 10 * 60 * 1000;
 const FALLBACK_STATES = [
   { id: "northwatch", name: "Northwatch", x: 1, y: 1, soldiers: 7, soldier_power: 2, money: 60, food: 90, water: 70, natural_oil_level: 0 },
   { id: "ironfield", name: "Ironfield", x: 2, y: 1, soldiers: 10, soldier_power: 2, money: 110, food: 80, water: 55, natural_oil_level: 1 },
@@ -176,7 +184,7 @@ window.handleLogout = async function() {
 async function loadProfileAndEnter() {
   let { data: profile, error } = await supabase
     .from("profiles")
-    .select("username")
+    .select("username, muted_until, last_mute_message_at")
     .eq("id", sessionUser.id)
     .maybeSingle();
 
@@ -204,6 +212,7 @@ async function loadProfileAndEnter() {
   }
 
   pendingUsername = null;
+  currentProfile = profile;
   currentUser = profile.username;
   showScreen("app-screen");
   await Promise.all([loadMessages(), setupGame()]);
@@ -253,6 +262,17 @@ window.sendMessage = async function() {
   const text = input.value.trim();
   if (!text || !sessionUser) return;
   input.value = "";
+
+  if (isCurrentlyMuted()) {
+    await maybeSendMuteMessage();
+    return;
+  }
+
+  if (shouldMuteForContent(text)) {
+    await applyMute();
+    await maybeSendMuteMessage(true);
+    return;
+  }
 
   const { error } = await supabase.from("messages").insert({
     user_id: sessionUser.id,
@@ -336,6 +356,89 @@ function updateOnlineUsers(users) {
   });
 }
 
+function isCurrentlyMuted() {
+  return currentProfile?.muted_until && new Date(currentProfile.muted_until).getTime() > Date.now();
+}
+
+async function applyMute() {
+  const mutedUntil = new Date(Date.now() + MUTE_MS).toISOString();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ muted_until: mutedUntil })
+    .eq("id", sessionUser.id)
+    .select("username, muted_until, last_mute_message_at")
+    .single();
+
+  if (!error && data) currentProfile = data;
+}
+
+async function maybeSendMuteMessage(force = false) {
+  const last = currentProfile?.last_mute_message_at
+    ? new Date(currentProfile.last_mute_message_at).getTime()
+    : 0;
+  if (!force && Date.now() - last < MUTE_MESSAGE_COOLDOWN_MS) return;
+
+  const now = new Date().toISOString();
+  await supabase.from("messages").insert({
+    user_id: sessionUser.id,
+    username: currentUser,
+    content: MUTE_MESSAGE,
+  });
+
+  const { data } = await supabase
+    .from("profiles")
+    .update({ last_mute_message_at: now })
+    .eq("id", sessionUser.id)
+    .select("username, muted_until, last_mute_message_at")
+    .single();
+
+  if (data) currentProfile = data;
+}
+
+function shouldMuteForContent(text) {
+  const compact = normalizeForModeration(text);
+  const spaced = compact.replace(/[^a-z0-9]+/g, " ");
+  const bannedPatterns = [
+    "6e696767", "6e6967676572", "6e69676761", "6b696b65", "6368696e6b",
+    "73706963", "666167", "666167676f74", "7472616e6e79", "726574617264",
+    "706f726e", "6e756465", "736578", "626c6f776a6f62", "68656e746169",
+    "6f6e6c7966616e73"
+  ].map(hexToText);
+
+  return bannedPatterns.some((pattern) => compact.includes(pattern) || spaced.includes(pattern));
+}
+
+function normalizeForModeration(text) {
+  const substitutions = {
+    "0": "o",
+    "1": "i",
+    "3": "e",
+    "4": "a",
+    "5": "s",
+    "7": "t",
+    "@": "a",
+    "$": "s",
+    "!": "i",
+    "|": "i",
+  };
+
+  return String(text)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[013457@$!|]/g, (char) => substitutions[char] || char)
+    .replace(/(.)\1{2,}/g, "$1$1")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function hexToText(hex) {
+  let output = "";
+  for (let i = 0; i < hex.length; i += 2) {
+    output += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+  }
+  return output;
+}
+
 async function setupGame() {
   await loadStates();
   buildMapCells();
@@ -388,6 +491,8 @@ async function loadOrCreatePlayer() {
       oil_cycle_minutes: randomOilCycleMinutes(),
       last_oil_maintenance_at: new Date().toISOString(),
       oil_failure_chance: 0.10,
+      custom_districts: [],
+      oil_rigs: [],
     })
     .select()
     .single();
@@ -431,9 +536,10 @@ async function refreshGame() {
 
   currentPlayer = player || currentPlayer;
   ownedStates = owned || [];
+  ensurePlayerMapData();
   allPlayers = (players || []).filter((playerRow) => playerRow.username !== currentUser);
   tradeOffers = trades || [];
-  selectedStateId = selectedStateId || ownedStates[0]?.state_id || allStates[0]?.id;
+  selectedStateId = selectedStateId || getOwnedRegions()[0]?.id || allStates[0]?.id;
 
   renderStats();
   renderMap();
@@ -442,6 +548,105 @@ async function refreshGame() {
   renderTradeOffers();
   updateNextDayButton();
   setupMapInteractions();
+}
+
+function ensurePlayerMapData() {
+  if (!currentPlayer) return;
+
+  if (!Array.isArray(currentPlayer.custom_districts)) {
+    currentPlayer.custom_districts = [];
+  }
+  if (!Array.isArray(currentPlayer.oil_rigs)) {
+    currentPlayer.oil_rigs = [];
+  }
+
+  const ownedStateIds = new Set(ownedStates.map((state) => state.state_id));
+  const ownedBaseCells = mapCells.filter((cell) => ownedStateIds.has(cell.stateId));
+  const districtStateIds = new Set(currentPlayer.custom_districts.map((district) => district.baseStateId));
+
+  ownedStates.forEach((owned) => {
+    if (districtStateIds.has(owned.state_id)) return;
+    const baseState = allStates.find((state) => state.id === owned.state_id);
+    currentPlayer.custom_districts.push({
+      id: `district:${owned.state_id}`,
+      name: owned.custom_name || baseState?.name || owned.state_id,
+      baseStateId: owned.state_id,
+      cells: ownedBaseCells.filter((cell) => cell.stateId === owned.state_id).map((cell) => cell.key),
+    });
+  });
+
+  const ownedCellKeys = new Set(ownedBaseCells.map((cell) => cell.key));
+  currentPlayer.custom_districts = currentPlayer.custom_districts
+    .map((district) => ({
+      ...district,
+      cells: Array.from(new Set((district.cells || []).filter((key) => ownedCellKeys.has(key)))),
+    }))
+    .filter((district) => district.cells.length > 0);
+
+  currentPlayer.oil_rigs = currentPlayer.oil_rigs
+    .filter((rig) => ownedCellKeys.has(rig.cellKey))
+    .map((rig) => ({
+      ...rig,
+      level: clampNumber(rig.level, 1, 5),
+      startedAt: rig.startedAt || new Date().toISOString(),
+      cycleMinutes: rig.cycleMinutes || randomOilCycleMinutes(),
+    }));
+}
+
+function getOwnedRegions() {
+  return (currentPlayer?.custom_districts || []).map((district) => ({
+    ...district,
+    owned: true,
+  }));
+}
+
+function getRegionOwnershipMap() {
+  const map = new Map();
+  getOwnedRegions().forEach((district) => {
+    district.cells.forEach((key) => map.set(key, district.id));
+  });
+  return map;
+}
+
+function getDisplayRegions() {
+  const ownedMap = getRegionOwnershipMap();
+  const regions = [];
+  const addedEnemy = new Set();
+
+  getOwnedRegions().forEach((district) => {
+    const baseState = allStates.find((state) => state.id === district.baseStateId);
+    const ownedState = getOwnedState(district.baseStateId);
+    regions.push({
+      id: district.id,
+      name: district.name,
+      owned: true,
+      baseStateId: district.baseStateId,
+      cells: district.cells,
+      baseState,
+      ownedState,
+    });
+  });
+
+  allStates.forEach((state) => {
+    const enemyCells = mapCells.filter((cell) => cell.stateId === state.id && !ownedMap.has(cell.key)).map((cell) => cell.key);
+    if (!enemyCells.length || addedEnemy.has(state.id)) return;
+    regions.push({
+      id: state.id,
+      name: state.name,
+      owned: false,
+      baseStateId: state.id,
+      cells: enemyCells,
+      baseState: state,
+      ownedState: null,
+    });
+    addedEnemy.add(state.id);
+  });
+
+  return regions;
+}
+
+function getSelectedRegion() {
+  return getDisplayRegions().find((region) => region.id === selectedStateId) || null;
 }
 
 function renderStats() {
@@ -454,63 +659,231 @@ function renderStats() {
   $("stat-power").textContent = Number(currentPlayer.soldier_power).toFixed(1);
   $("stat-land").textContent = land;
   $("stat-day").textContent = currentPlayer.day;
-  $("stat-oil").textContent = getTotalOilLevels();
+  $("stat-oil").textContent = getPlayerOilRigs().length;
   $("war-status").textContent = `${currentUser}'s kingdom controls ${land} state${land === 1 ? "" : "s"}.`;
 }
 
 function renderMap() {
-  const ownedIds = new Set(ownedStates.map((state) => state.state_id));
+  const regionMap = getRegionOwnershipMap();
+  const displayRegions = getDisplayRegions();
+  const regionById = new Map(displayRegions.map((region) => [region.id, region]));
   $("map-grid").innerHTML = "";
 
   mapCells.forEach((cell) => {
-    const state = allStates.find((item) => item.id === cell.stateId);
-    if (!state) return;
-    const owned = ownedIds.has(state.id);
-    const ownedState = getOwnedState(state.id);
-    const oilLevel = ownedState?.oil_rig_level || state.natural_oil_level || 0;
+    const regionId = regionMap.get(cell.key) || cell.stateId;
+    const region = regionById.get(regionId);
+    const state = region?.baseState;
+    if (!state || !region) return;
+    const owned = region.owned;
     const tile = document.createElement("button");
     tile.type = "button";
+    const sameRegion = (dx, dy) => {
+      const neighbor = mapCellByKey.get(`${cell.x + dx},${cell.y + dy}`);
+      if (!neighbor) return false;
+      return (regionMap.get(neighbor.key) || neighbor.stateId) === region.id;
+    };
     tile.className = [
       "map-cell",
       owned ? "owned" : "enemy",
-      state.id === selectedStateId ? "selected" : "",
-      cell.edges.top ? "edge-top" : "",
-      cell.edges.right ? "edge-right" : "",
-      cell.edges.bottom ? "edge-bottom" : "",
-      cell.edges.left ? "edge-left" : "",
-      cell.capital ? "capital" : "",
-      oilLevel ? "oil" : "",
+      region.id === selectedStateId ? "selected" : "",
+      interactionMode === "edit-borders" && owned ? "editing" : "",
+      selectedTileKeys.has(cell.key) ? "tile-picked" : "",
+      !sameRegion(0, -1) ? "edge-top" : "",
+      !sameRegion(1, 0) ? "edge-right" : "",
+      !sameRegion(0, 1) ? "edge-bottom" : "",
+      !sameRegion(-1, 0) ? "edge-left" : "",
     ].join(" ");
     tile.style.backgroundColor = owned ? cell.ownedColor : cell.enemyColor;
-    tile.title = `${getStateDisplayName(state)} | Soldiers: ${owned ? ownedState?.soldiers || 0 : state.soldiers} | Power: ${Number(state.soldier_power).toFixed(1)} | Oil: ${oilLevel}`;
-    if (cell.capital) tile.dataset.label = `${getStateDisplayName(state)} S:${owned ? ownedState?.soldiers || 0 : state.soldiers} O:${oilLevel}`;
-    if (oilLevel) tile.dataset.oil = oilLevel;
-    tile.onclick = () => {
-      selectedStateId = state.id;
-      renderMap();
-      renderSelectedState();
-    };
+    tile.title = `${region.name} | Soldiers: ${owned ? region.ownedState?.soldiers || 0 : state.soldiers} | Power: ${Number(state.soldier_power).toFixed(1)}`;
+    tile.onclick = () => handleMapCellClick(cell, region);
     $("map-grid").appendChild(tile);
+  });
+
+  renderStateLabels();
+  renderOilRigs();
+}
+
+function renderStateLabels() {
+  getDisplayRegions().forEach((region) => {
+    const stateCells = region.cells.map((key) => mapCellByKey.get(key)).filter(Boolean);
+    if (!stateCells.length) return;
+    const center = getStateCenterCell(stateCells);
+    const oilLevel = getRegionRigCount(region.id);
+    const label = document.createElement("div");
+    label.className = "state-map-label";
+    label.style.gridColumn = `${Math.max(1, center.x - 4)} / span 9`;
+    label.style.gridRow = `${Math.max(1, center.y - 1)} / span 3`;
+    label.innerHTML = `
+      <strong>${escapeHTML(region.name)}</strong>
+      <span>${region.owned ? "Yours" : "Enemy"} | S:${region.owned ? region.ownedState?.soldiers || 0 : region.baseState.soldiers} P:${Number(region.baseState.soldier_power).toFixed(1)} R:${oilLevel}</span>
+    `;
+    $("map-grid").appendChild(label);
   });
 }
 
-function renderSelectedState() {
-  const state = getSelectedState();
-  if (!state) return;
+function renderOilRigs() {
+  getPlayerOilRigs().forEach((rig) => {
+    const cell = mapCellByKey.get(rig.cellKey);
+    if (!cell) return;
+    const wrap = document.createElement("div");
+    wrap.className = "rig-overlay";
+    wrap.style.gridColumn = `${cell.x + 1} / span 3`;
+    wrap.style.gridRow = `${Math.max(1, cell.y)} / span 1`;
 
-  const owned = getOwnedState(state.id);
-  $("rename-state-input").value = owned?.custom_name || "";
+    if (isRigReady(rig)) {
+      wrap.innerHTML = `<button class="rig-ready" type="button" onclick="collectRig('${rig.id}')">Collect $${getRigPayout(rig)}</button>`;
+    } else {
+      const pct = getRigProgressPercent(rig);
+      wrap.innerHTML = `<button class="rig-progress" type="button" onclick="selectRig('${rig.id}')"><span style="width:${pct}%"></span></button>`;
+    }
+    $("map-grid").appendChild(wrap);
+  });
+}
+
+window.selectRig = function(rigId) {
+  selectedRigId = rigId;
+  const rig = getSelectedRig();
+  if (rig) addLog(`Selected level ${rig.level} rig.`);
+};
+
+function handleMapCellClick(cell, region) {
+  if (interactionMode === "place-rig") {
+    placeOilRigAtCell(cell, region);
+    return;
+  }
+
+  if (interactionMode === "edit-borders") {
+    if (!region.owned) return;
+    if (selectedTileKeys.has(cell.key)) selectedTileKeys.delete(cell.key);
+    else selectedTileKeys.add(cell.key);
+    renderMap();
+    renderSelectedState();
+    return;
+  }
+
+  selectedStateId = region.id;
+  renderMap();
+  renderSelectedState();
+}
+
+async function placeOilRigAtCell(cell, region) {
+  if (!region.owned) return addLog("You can only place rigs on your own land.");
+  if (getPlayerOilRigs().some((rig) => rig.cellKey === cell.key)) return addLog("A rig already exists on that tile.");
+  if (Number(currentPlayer.money) < 1000) return addLog("You need $1000 to place a rig.");
+
+  const now = new Date().toISOString();
+  const rigs = [
+    ...getPlayerOilRigs(),
+    {
+      id: crypto.randomUUID(),
+      cellKey: cell.key,
+      districtId: region.id,
+      level: 1,
+      startedAt: now,
+      cycleMinutes: randomOilCycleMinutes(),
+    },
+  ];
+  interactionMode = "normal";
+  await saveOilRigs(rigs, { money: Number(currentPlayer.money) - 1000 });
+  addLog(`Placed a new oil rig in ${region.name}.`);
+}
+
+window.toggleBorderEditMode = function() {
+  interactionMode = interactionMode === "edit-borders" ? "normal" : "edit-borders";
+  if (interactionMode === "normal") selectedTileKeys.clear();
+  renderMap();
+  renderSelectedState();
+};
+
+window.clearTileSelection = function() {
+  selectedTileKeys.clear();
+  renderMap();
+  renderSelectedState();
+};
+
+window.assignSelectedTilesToCurrentState = async function() {
+  const region = getSelectedRegion();
+  if (!region?.owned) return addLog("Select one of your own states first.");
+  if (!selectedTileKeys.size) return addLog("Pick some owned tiles first.");
+
+  const allOwnedKeys = new Set(mapCells.filter((cell) => getRegionOwnershipMap().has(cell.key)).map((cell) => cell.key));
+  if ([...selectedTileKeys].some((key) => !allOwnedKeys.has(key))) return addLog("Only owned tiles can be reassigned.");
+  if ([...selectedTileKeys].some((key) => mapCellByKey.get(key)?.stateId !== region.baseStateId)) {
+    return addLog("Border edits can only reshape tiles inside the same parent territory.");
+  }
+
+  const districts = getOwnedRegions().map((district) => ({
+    ...district,
+    cells: district.id === region.id
+      ? Array.from(new Set([...district.cells, ...selectedTileKeys]))
+      : district.cells.filter((key) => !selectedTileKeys.has(key)),
+  })).filter((district) => district.cells.length > 0);
+
+  selectedTileKeys.clear();
+  await saveDistricts(districts);
+  addLog(`Updated borders for ${region.name}.`);
+};
+
+window.createStateFromSelection = async function() {
+  if (!selectedTileKeys.size) return addLog("Pick some owned tiles first.");
+  const name = $("new-state-name").value.trim();
+  if (name.length < 2) return addLog("New state name needs at least 2 characters.");
+
+  const allOwnedKeys = new Set(mapCells.filter((cell) => getRegionOwnershipMap().has(cell.key)).map((cell) => cell.key));
+  if ([...selectedTileKeys].some((key) => !allOwnedKeys.has(key))) return addLog("Only owned tiles can become a new state.");
+
+  const existingRegions = getOwnedRegions();
+  const firstCellKey = [...selectedTileKeys][0];
+  const sourceRegion = existingRegions.find((district) => district.cells.includes(firstCellKey));
+  if (!sourceRegion) return addLog("Select tiles from one of your owned states.");
+  if ([...selectedTileKeys].some((key) => mapCellByKey.get(key)?.stateId !== sourceRegion.baseStateId)) {
+    return addLog("A new state can only be carved from one parent territory at a time.");
+  }
+
+  const districts = existingRegions
+    .map((district) => ({
+      ...district,
+      cells: district.cells.filter((key) => !selectedTileKeys.has(key)),
+    }))
+    .filter((district) => district.cells.length > 0);
+
+  const newDistrictId = `district:${crypto.randomUUID()}`;
+  districts.push({
+    id: newDistrictId,
+    name,
+    baseStateId: sourceRegion.baseStateId,
+    cells: [...selectedTileKeys],
+  });
+
+  selectedTileKeys.clear();
+  $("new-state-name").value = "";
+  selectedStateId = newDistrictId;
+  await saveDistricts(districts);
+  addLog(`Created new state ${name}.`);
+};
+
+function renderSelectedState() {
+  const region = getSelectedRegion();
+  if (!region) return;
+
+  const state = region.baseState;
+  const owned = region.owned;
+  $("rename-state-input").value = owned ? region.name : "";
   $("oil-rig-info").textContent = owned
-    ? `Level ${owned.oil_rig_level || 0}/5. Generates $${(owned.oil_rig_level || 0) * 10} every ${currentPlayer.oil_cycle_minutes || 50} minutes. Maintenance: ${getMaintenanceStatusText()}.`
-    : `Enemy land. Natural oil level: ${state.natural_oil_level || 0}.`;
+    ? `${getRegionRigCount(region.id)} rigs in this state. Place rigs by entering rig placement mode. Maintenance: ${getMaintenanceStatusText()}.`
+    : `Enemy land. Natural oil sites: ${state.natural_oil_level || 0}.`;
   $("selected-state").innerHTML = `
-    <h3>${escapeHTML(getStateDisplayName(state))}</h3>
+    <h3>${escapeHTML(region.name)}</h3>
     <p>${owned ? "You own this state." : "Enemy territory."}</p>
-    <p>Soldiers here: ${owned ? owned.soldiers : state.soldiers}</p>
+    <p>Tiles: ${region.cells.length}</p>
+    <p>Soldiers here: ${owned ? region.ownedState?.soldiers || 0 : state.soldiers}</p>
     <p>Soldier power: ${Number(state.soldier_power).toFixed(1)}</p>
-    <p>Oil rig level: ${owned ? owned.oil_rig_level || 0 : state.natural_oil_level || 0}</p>
+    <p>Oil rigs: ${getRegionRigCount(region.id)}</p>
     <p>Resources: $${state.money}, ${state.food} food, ${state.water} water</p>
   `;
+  $("border-mode-info").textContent = interactionMode === "edit-borders"
+    ? `${selectedTileKeys.size} owned tiles selected for border editing.`
+    : "Select an owned state, then edit its borders tile by tile.";
 }
 
 window.buyResource = async function(type) {
@@ -522,22 +895,17 @@ window.buyResource = async function(type) {
 };
 
 window.renameSelectedState = async function() {
-  const state = getSelectedState();
-  const owned = state ? getOwnedState(state.id) : null;
-  if (!state || !owned) return addLog("You can only rename states you own.");
+  const region = getSelectedRegion();
+  if (!region?.owned) return addLog("You can only rename states you own.");
 
   const customName = $("rename-state-input").value.trim();
   if (customName.length < 2) return addLog("State name needs at least 2 characters.");
 
-  const { error } = await supabase
-    .from("player_states")
-    .update({ custom_name: customName })
-    .eq("player_id", sessionUser.id)
-    .eq("state_id", state.id);
-
-  if (error) return console.error(error);
-  addLog(`${state.name} renamed to ${customName}.`);
-  await refreshGame();
+  const districts = getOwnedRegions().map((district) =>
+    district.id === region.id ? { ...district, name: customName } : district
+  );
+  await saveDistricts(districts);
+  addLog(`${region.name} renamed to ${customName}.`);
 };
 
 window.sellResource = async function(type) {
@@ -549,62 +917,65 @@ window.sellResource = async function(type) {
   addLog(`Sold 50 ${type} for $20.`);
 };
 
-window.buildOrUpgradeOilRig = async function() {
-  const state = getSelectedState();
-  const owned = state ? getOwnedState(state.id) : null;
-  if (!state || !owned) return addLog("Select one of your own states first.");
-
-  const level = owned.oil_rig_level || 0;
-  if (level >= 5) return addLog("This oil rig is already level 5.");
-
-  const cost = level === 0 ? 1000 : 500;
-  if (Number(currentPlayer.money) < cost) return addLog(`You need $${cost} for this.`);
-
-  const { error } = await supabase
-    .from("player_states")
-    .update({ oil_rig_level: level + 1 })
-    .eq("player_id", sessionUser.id)
-    .eq("state_id", state.id);
-
-  if (error) return console.error(error);
-
-  await updatePlayer({ money: Number(currentPlayer.money) - cost });
-  addLog(`${getStateDisplayName(state)} oil rig is now level ${level + 1}.`);
+window.beginPlaceRigMode = function() {
+  const region = getSelectedRegion();
+  if (!region?.owned) return addLog("Select one of your own states first.");
+  interactionMode = interactionMode === "place-rig" ? "normal" : "place-rig";
+  selectedTileKeys.clear();
+  renderMap();
+  renderSelectedState();
+  addLog(interactionMode === "place-rig" ? "Click an owned tile to place a new oil rig." : "Rig placement mode off.");
 };
 
-window.collectOilIncome = async function() {
-  const income = calculateOilIncome();
-  if (income <= 0) return addLog("No oil income ready yet.");
+window.upgradeSelectedRig = async function() {
+  const rig = getSelectedRig();
+  if (!rig) return addLog("Select an oil rig first.");
+  if (rig.level >= 5) return addLog("That rig is already level 5.");
+  if (Number(currentPlayer.money) < 500) return addLog("You need $500 to upgrade a rig.");
+
+  const rigs = getPlayerOilRigs().map((item) =>
+    item.id === rig.id ? { ...item, level: item.level + 1 } : item
+  );
+  await saveOilRigs(rigs, { money: Number(currentPlayer.money) - 500 });
+  addLog(`Rig upgraded to level ${rig.level + 1}.`);
+};
+
+window.collectRig = async function(rigId) {
+  const rig = getPlayerOilRigs().find((item) => item.id === rigId);
+  if (!rig || !isRigReady(rig)) return;
+
+  const payout = rig.level * 10;
+  const payoutTotal = getRigPayout(rig);
+  const nextStart = new Date().toISOString();
+  const nextCycleMinutes = randomOilCycleMinutes();
 
   if (isOilMaintenanceOverdue()) {
     const chance = Number(currentPlayer.oil_failure_chance ?? 0.10);
     if (Math.random() < chance) {
-      await updatePlayer({
-        last_oil_collected_at: new Date().toISOString(),
-        oil_cycle_minutes: randomOilCycleMinutes(),
-        oil_failure_chance: Math.min(0.95, chance + 0.02),
-      });
-      addLog(`Oil rigs failed due to overdue maintenance. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
+      const rigs = getPlayerOilRigs().map((item) =>
+        item.id === rig.id ? { ...item, startedAt: nextStart, cycleMinutes: nextCycleMinutes } : item
+      );
+      await saveOilRigs(rigs, { oil_failure_chance: Math.min(0.95, chance + 0.02) });
+      addLog(`Rig collection failed from missed maintenance. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
       return;
     }
 
-    await updatePlayer({
-      money: Number(currentPlayer.money) + income,
-      last_oil_collected_at: new Date().toISOString(),
-      oil_cycle_minutes: randomOilCycleMinutes(),
+    const rigs = getPlayerOilRigs().map((item) =>
+      item.id === rig.id ? { ...item, startedAt: nextStart, cycleMinutes: nextCycleMinutes } : item
+    );
+    await saveOilRigs(rigs, {
+      money: Number(currentPlayer.money) + payoutTotal,
       oil_failure_chance: Math.min(0.95, chance + 0.02),
     });
-    addLog(`Collected $${income}, but maintenance is overdue. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
+    addLog(`Collected $${payoutTotal}, but maintenance is overdue. Failure chance is now ${Math.round(Math.min(0.95, chance + 0.02) * 100)}%.`);
     return;
   }
 
-  await updatePlayer({
-    money: Number(currentPlayer.money) + income,
-    last_oil_collected_at: new Date().toISOString(),
-    oil_cycle_minutes: randomOilCycleMinutes(),
-    oil_failure_chance: 0.10,
-  });
-  addLog(`Collected $${income} from oil rigs.`);
+  const rigs = getPlayerOilRigs().map((item) =>
+    item.id === rig.id ? { ...item, startedAt: nextStart, cycleMinutes: nextCycleMinutes } : item
+  );
+  await saveOilRigs(rigs, { money: Number(currentPlayer.money) + payoutTotal, oil_failure_chance: 0.10 });
+  addLog(`Collected $${payoutTotal} from a level ${rig.level} rig.`);
 };
 
 window.maintainOilRigs = async function() {
@@ -651,9 +1022,10 @@ window.advanceDay = async function() {
 };
 
 window.attackSelectedState = async function() {
-  const state = getSelectedState();
-  if (!state) return;
-  if (getOwnedState(state.id)) return addLog("You already own this state.");
+  const region = getSelectedRegion();
+  const state = region?.baseState;
+  if (!state || !region) return;
+  if (region.owned) return addLog("You already own this state.");
 
   const sent = clampNumber($("attack-count").value, 1, currentPlayer.soldiers);
   if (sent > currentPlayer.soldiers) return addLog("You do not have that many soldiers.");
@@ -699,9 +1071,10 @@ window.attackSelectedState = async function() {
 };
 
 window.moveSoldiersToSelectedState = async function() {
-  const state = getSelectedState();
-  const owned = state ? getOwnedState(state.id) : null;
-  if (!state || !owned) return addLog("Select one of your own states first.");
+  const region = getSelectedRegion();
+  const state = region?.baseState;
+  const owned = state ? getOwnedState(region.baseStateId) : null;
+  if (!state || !owned || !region?.owned) return addLog("Select one of your own states first.");
 
   const count = clampNumber($("move-count").value, 1, currentPlayer.soldiers);
   if (count > currentPlayer.soldiers) return addLog("You do not have that many free soldiers.");
@@ -710,11 +1083,11 @@ window.moveSoldiersToSelectedState = async function() {
     .from("player_states")
     .update({ soldiers: owned.soldiers + count })
     .eq("player_id", sessionUser.id)
-    .eq("state_id", state.id);
+    .eq("state_id", region.baseStateId);
 
   if (error) return console.error(error);
   await updatePlayer({ soldiers: currentPlayer.soldiers - count });
-  addLog(`Moved ${count} soldier${count === 1 ? "" : "s"} to ${state.name}.`);
+  addLog(`Moved ${count} soldier${count === 1 ? "" : "s"} to ${region.name}.`);
 };
 
 window.saveGame = async function() {
@@ -825,7 +1198,7 @@ function canAffordTradeSide(side, player) {
     side.water <= Number(player.water) &&
     side.soldiers <= Number(player.soldiers) &&
     side.population <= Number(player.population) &&
-    side.oil_rigs <= getTotalOilLevels();
+    side.oil_rigs <= getRigCount();
 }
 
 function formatTradeSide(side) {
@@ -833,7 +1206,7 @@ function formatTradeSide(side) {
   ["money", "food", "water", "soldiers", "population"].forEach((key) => {
     if (Number(side?.[key]) > 0) parts.push(`${side[key]} ${key}`);
   });
-  if (Number(side?.oil_rigs) > 0) parts.push(`${side.oil_rigs} oil rig level${Number(side.oil_rigs) === 1 ? "" : "s"}`);
+  if (Number(side?.oil_rigs) > 0) parts.push(`${side.oil_rigs} oil rig${Number(side.oil_rigs) === 1 ? "" : "s"}`);
   return parts.length ? parts.join(", ") : "nothing";
 }
 
@@ -843,25 +1216,67 @@ function clearTradeForm() {
   });
 }
 
+function getPlayerOilRigs() {
+  return Array.isArray(currentPlayer?.oil_rigs) ? currentPlayer.oil_rigs : [];
+}
+
+function getSelectedRig() {
+  return getPlayerOilRigs().find((rig) => rig.id === selectedRigId) || null;
+}
+
+function getRigCount() {
+  return getPlayerOilRigs().length;
+}
+
+function getRegionRigCount(regionId) {
+  return getPlayerOilRigs().filter((rig) => rig.districtId === regionId).length;
+}
+
 function getTotalOilLevels() {
-  return ownedStates.reduce((total, state) => total + Number(state.oil_rig_level || 0), 0);
+  return getPlayerOilRigs().reduce((total, rig) => total + Number(rig.level || 0), 0);
 }
 
 function calculateOilIncome() {
-  const oilLevels = getTotalOilLevels();
-  if (!oilLevels) return 0;
-
-  const lastCollected = currentPlayer?.last_oil_collected_at
-    ? new Date(currentPlayer.last_oil_collected_at).getTime()
-    : Date.now();
-  const elapsedMinutes = Math.min(50 * 60, Math.max(0, (Date.now() - lastCollected) / 60000));
-  const cycleMinutes = Number(currentPlayer?.oil_cycle_minutes) || 50;
-  const completedCycles = Math.floor(elapsedMinutes / cycleMinutes);
-  return oilLevels * 10 * completedCycles;
+  return getPlayerOilRigs()
+    .filter((rig) => isRigReady(rig))
+    .reduce((total, rig) => total + getRigPayout(rig), 0);
 }
 
 function randomOilCycleMinutes() {
   return Math.floor(35 + Math.random() * 36);
+}
+
+function isRigReady(rig) {
+  return getRigCompletedCycles(rig) > 0;
+}
+
+function getRigProgressPercent(rig) {
+  const start = new Date(rig.startedAt).getTime();
+  const end = start + (rig.cycleMinutes || 50) * 60000;
+  const pct = ((Date.now() - start) / Math.max(1, end - start)) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
+function getRigCompletedCycles(rig) {
+  const elapsedMinutes = Math.min(50 * 60, Math.max(0, (Date.now() - new Date(rig.startedAt).getTime()) / 60000));
+  return Math.floor(elapsedMinutes / Math.max(1, rig.cycleMinutes || 50));
+}
+
+function getRigPayout(rig) {
+  return getRigCompletedCycles(rig) * rig.level * 10;
+}
+
+async function saveDistricts(districts) {
+  const syncedRigs = getPlayerOilRigs().map((rig) => {
+    const district = districts.find((item) => item.cells.includes(rig.cellKey));
+    return district ? { ...rig, districtId: district.id } : rig;
+  });
+  await updatePlayer({ custom_districts: districts, oil_rigs: syncedRigs });
+}
+
+async function saveOilRigs(rigs, extraPatch = {}) {
+  currentPlayer.oil_rigs = rigs;
+  await updatePlayer({ oil_rigs: rigs, ...extraPatch });
 }
 
 function isOilMaintenanceOverdue() {
@@ -1022,24 +1437,20 @@ function buildMapCells() {
         const distance = (x - seed.x) ** 2 + (y - seed.y) ** 2 + wobble * 3;
         return !best || distance < best.distance ? { seed, distance } : best;
       }, null).seed;
-      cells.push({ x, y, stateId: nearest.stateId });
+      cells.push({ x, y, key: `${x},${y}`, stateId: nearest.stateId });
     }
   }
 
   mapCells = cells.map((cell) => {
     const same = (dx, dy) => cells.find((other) => other.x === cell.x + dx && other.y === cell.y + dy)?.stateId === cell.stateId;
     const stateCells = cells.filter((other) => other.stateId === cell.stateId);
-    const center = stateCells.reduce((acc, item) => ({ x: acc.x + item.x, y: acc.y + item.y }), { x: 0, y: 0 });
-    center.x /= stateCells.length;
-    center.y /= stateCells.length;
-    const capital = stateCells.reduce((best, item) => {
-      const distance = (item.x - center.x) ** 2 + (item.y - center.y) ** 2;
-      return !best || distance < best.distance ? { item, distance } : best;
-    }, null).item;
+    const capital = getStateCenterCell(stateCells);
+    const oilSpot = getOilSpotCell(stateCells, cell.stateId);
 
     return {
       ...cell,
       capital: capital.x === cell.x && capital.y === cell.y,
+      oilSpot: oilSpot.x === cell.x && oilSpot.y === cell.y,
       edges: {
         top: !same(0, -1),
         right: !same(1, 0),
@@ -1050,11 +1461,27 @@ function buildMapCells() {
       enemyColor: colorForState(cell.stateId, false),
     };
   });
+  mapCellByKey = new Map(mapCells.map((cell) => [cell.key, cell]));
 }
 
 function colorForState(id, owned) {
   const hue = hashString(id) % 360;
-  return owned ? `hsl(${hue} 48% 31%)` : `hsl(${hue} 38% 24%)`;
+  return owned ? `hsl(${hue} 34% 34%)` : `hsl(${hue} 28% 27%)`;
+}
+
+function getStateCenterCell(stateCells) {
+  const center = stateCells.reduce((acc, item) => ({ x: acc.x + item.x, y: acc.y + item.y }), { x: 0, y: 0 });
+  center.x /= stateCells.length;
+  center.y /= stateCells.length;
+  return stateCells.reduce((best, item) => {
+    const distance = (item.x - center.x) ** 2 + (item.y - center.y) ** 2;
+    return !best || distance < best.distance ? { ...item, distance } : best;
+  }, null);
+}
+
+function getOilSpotCell(stateCells, stateId) {
+  const rng = seededRandom(hashString(`${stateId}:oil`));
+  return stateCells[Math.floor(rng() * stateCells.length)] || stateCells[0];
 }
 
 function hashString(text) {
@@ -1074,7 +1501,7 @@ function seededRandom(seed) {
 }
 
 function getSelectedState() {
-  return allStates.find((state) => state.id === selectedStateId);
+  return getSelectedRegion()?.baseState || allStates.find((state) => state.id === selectedStateId);
 }
 
 function getOwnedState(id) {
@@ -1082,7 +1509,8 @@ function getOwnedState(id) {
 }
 
 function getStateDisplayName(state) {
-  return getOwnedState(state.id)?.custom_name || state.name;
+  const district = getOwnedRegions().find((region) => region.baseStateId === state.id);
+  return district?.name || state.name;
 }
 
 function addLog(text) {

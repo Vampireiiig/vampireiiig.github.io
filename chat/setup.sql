@@ -12,6 +12,8 @@ drop table if exists profiles cascade;
 create table profiles (
   id uuid references auth.users primary key,
   username text unique not null,
+  muted_until timestamp,
+  last_mute_message_at timestamp,
   created_at timestamp default now()
 );
 
@@ -39,6 +41,8 @@ create table players (
   oil_cycle_minutes integer default 50,
   last_oil_maintenance_at timestamp default now(),
   oil_failure_chance numeric default 0.10,
+  custom_districts jsonb default '[]'::jsonb,
+  oil_rigs jsonb default '[]'::jsonb,
   updated_at timestamp default now()
 );
 
@@ -114,6 +118,7 @@ alter table trade_offers enable row level security;
 
 create policy "Read profiles" on profiles for select using (true);
 create policy "Insert own profile" on profiles for insert with check (auth.uid() = id);
+create policy "Update own profile moderation" on profiles for update using (auth.uid() = id) with check (auth.uid() = id);
 
 create policy "Read messages" on messages for select using (auth.role() = 'authenticated');
 create policy "Send own messages" on messages for insert with check (auth.uid() = user_id);
@@ -193,12 +198,12 @@ begin
   offer_oil := coalesce((t.offer->>'oil_rigs')::integer, 0);
   request_oil := coalesce((t.request->>'oil_rigs')::integer, 0);
 
-  if offer_oil > coalesce((select sum(oil_rig_level) from player_states where player_id = t.from_player), 0) then
-    raise exception 'Offering player does not own enough oil rig levels';
+  if offer_oil > coalesce(jsonb_array_length(giver.oil_rigs), 0) then
+    raise exception 'Offering player does not own enough oil rigs';
   end if;
 
-  if request_oil > coalesce((select sum(oil_rig_level) from player_states where player_id = receiver_id), 0) then
-    raise exception 'You do not own enough oil rig levels';
+  if request_oil > coalesce(jsonb_array_length(receiver.oil_rigs), 0) then
+    raise exception 'You do not own enough oil rigs';
   end if;
 
   update players set
@@ -219,61 +224,73 @@ begin
     updated_at = now()
   where id = receiver_id;
 
-  perform move_oil_rig_levels(t.from_player, receiver_id, offer_oil);
-  perform move_oil_rig_levels(receiver_id, t.from_player, request_oil);
+  perform move_oil_rigs_count(t.from_player, receiver_id, offer_oil);
+  perform move_oil_rigs_count(receiver_id, t.from_player, request_oil);
 
   update trade_offers set status = 'accepted' where id = trade_id;
 end;
 $$;
 
-create or replace function move_oil_rig_levels(from_id uuid, to_id uuid, level_count integer)
+create or replace function move_oil_rigs_count(from_id uuid, to_id uuid, rig_count integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  remaining integer := coalesce(level_count, 0);
-  row_data record;
-  take_levels integer;
-  add_levels integer;
+  from_rigs jsonb;
+  to_rigs jsonb;
+  to_districts jsonb;
+  target_district_id text;
+  target_cell_key text;
+  moved jsonb;
+  kept jsonb;
 begin
-  if remaining <= 0 then
+  if coalesce(rig_count, 0) <= 0 then
     return;
   end if;
 
-  for row_data in
-    select * from player_states
-    where player_id = from_id and oil_rig_level > 0
-    order by oil_rig_level desc
-  loop
-    exit when remaining <= 0;
-    take_levels := least(row_data.oil_rig_level, remaining);
-    update player_states
-    set oil_rig_level = oil_rig_level - take_levels
-    where player_id = from_id and state_id = row_data.state_id;
-    remaining := remaining - take_levels;
-  end loop;
+  select oil_rigs into from_rigs from players where id = from_id for update;
+  select oil_rigs, custom_districts into to_rigs, to_districts from players where id = to_id for update;
 
-  remaining := coalesce(level_count, 0);
-
-  for row_data in
-    select * from player_states
-    where player_id = to_id
-    order by oil_rig_level asc
-  loop
-    exit when remaining <= 0;
-    add_levels := least(5 - row_data.oil_rig_level, remaining);
-    if add_levels > 0 then
-      update player_states
-      set oil_rig_level = oil_rig_level + add_levels
-      where player_id = to_id and state_id = row_data.state_id;
-      remaining := remaining - add_levels;
-    end if;
-  end loop;
-
-  if remaining > 0 then
-    raise exception 'Receiving player has no space for oil rig levels';
+  if coalesce(jsonb_array_length(from_rigs), 0) < rig_count then
+    raise exception 'Not enough oil rigs to trade';
   end if;
+
+  target_district_id := to_districts->0->>'id';
+  target_cell_key := to_districts->0->'cells'->>0;
+  if target_district_id is null or target_cell_key is null then
+    raise exception 'Receiving player needs at least one owned state for incoming rigs';
+  end if;
+
+  select coalesce(jsonb_agg(value), '[]'::jsonb) into moved
+  from (
+    select
+      jsonb_set(
+        jsonb_set(value, '{districtId}', to_jsonb(target_district_id), true),
+        '{cellKey}',
+        to_jsonb(target_cell_key),
+        true
+      ) as value
+    from jsonb_array_elements(coalesce(from_rigs, '[]'::jsonb)) with ordinality as t(value, ordinality)
+    order by coalesce((value->>'level')::integer, 1) desc, ordinality
+    limit rig_count
+  ) moved_rows;
+
+  select coalesce(jsonb_agg(value), '[]'::jsonb) into kept
+  from (
+    select value
+    from jsonb_array_elements(coalesce(from_rigs, '[]'::jsonb)) with ordinality as t(value, ordinality)
+    where ordinality not in (
+      select ordinality
+      from jsonb_array_elements(coalesce(from_rigs, '[]'::jsonb)) with ordinality as t2(value, ordinality)
+      order by coalesce((value->>'level')::integer, 1) desc, ordinality
+      limit rig_count
+    )
+    order by ordinality
+  ) kept_rows;
+
+  update players set oil_rigs = kept where id = from_id;
+  update players set oil_rigs = coalesce(to_rigs, '[]'::jsonb) || moved where id = to_id;
 end;
 $$;
