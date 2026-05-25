@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RGD Chat</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-bg">
+      <div class="grid-overlay"></div>
+      <div class="glow-orb orb1"></div>
+      <div class="glow-orb orb2"></div>
+    </div>
+    <div class="auth-box">
+      <div class="auth-logo">
+        <span class="logo-bracket">[</span>
+        RGD
+        <span class="logo-bracket">]</span>
+      </div>
+      <p class="auth-subtitle">ROYAL'S GAME DEV — CHAT</p>
+
+      <div class="tab-row">
+        <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">LOGIN</button>
+        <button class="tab-btn" id="tab-signup" onclick="switchTab('signup')">SIGN UP</button>
+      </div>
+
+      <div id="form-login" class="auth-form">
+        <div class="input-group">
+          <label>USERNAME</label>
+          <input type="text" id="login-username" placeholder="enter username" autocomplete="off" />
+        </div>
+        <div class="input-group">
+          <label>PASSWORD</label>
+          <input type="password" id="login-password" placeholder="••••••••" />
+        </div>
+        <div id="login-error" class="error-msg"></div>
+        <button class="submit-btn" onclick="handleLogin()">
+          <span>LOGIN</span>
+          <div class="btn-glitch"></div>
+        </button>
+      </div>
+
+      <div id="form-signup" class="auth-form hidden">
+        <div class="input-group">
+          <label>USERNAME</label>
+          <input type="text" id="signup-username" placeholder="choose a username" autocomplete="off" />
+        </div>
+        <div class="input-group">
+          <label>EMAIL</label>
+          <input type="email" id="signup-email" placeholder="you@example.com" />
+        </div>
+        <div class="input-group">
+          <label>PASSWORD</label>
+          <input type="password" id="signup-password" placeholder="••••••••" />
+        </div>
+        <div id="signup-error" class="error-msg"></div>
+        <button class="submit-btn" onclick="handleSignup()">
+          <span>CREATE ACCOUNT</span>
+          <div class="btn-glitch"></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHAT SCREEN -->
+  <div id="chat-screen" class="screen">
+    <div class="chat-bg">
+      <div class="grid-overlay"></div>
+    </div>
+
+    <header class="chat-header">
+      <div class="header-left">
+        <span class="logo-small">[RGD]</span>
+        <span class="channel-name">#general</span>
+      </div>
+      <div class="header-right">
+        <div class="online-indicator">
+          <span class="online-dot"></span>
+          <span id="online-count">0</span> online
+        </div>
+        <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
+      </div>
+    </header>
+
+    <div class="chat-body">
+      <div class="online-sidebar">
+        <div class="sidebar-title">ONLINE</div>
+        <ul id="online-list"></ul>
+      </div>
+
+      <div class="chat-main">
+        <div id="messages" class="messages"></div>
+        <div class="input-bar">
+          <input type="text" id="msg-input" placeholder="send a message..." autocomplete="off" onkeydown="if(event.key==='Enter') sendMessage()" />
+          <button class="send-btn" onclick="sendMessage()">SEND</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
