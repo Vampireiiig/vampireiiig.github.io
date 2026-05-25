@@ -3,92 +3,153 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RGD Chat</title>
+  <title>RGD War Chat</title>
   <link rel="stylesheet" href="style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 </head>
 <body>
-
-  <!-- AUTH SCREEN -->
-  <div id="auth-screen" class="screen active">
-    <div class="auth-bg">
-      <div class="grid-overlay"></div>
-      <div class="glow-orb orb1"></div>
-      <div class="glow-orb orb2"></div>
-    </div>
-    <div class="auth-box">
-      <div class="auth-logo">
-        <span class="logo-bracket">[</span>RGD<span class="logo-bracket">]</span>
+  <main id="auth-screen" class="screen active">
+    <section class="auth-panel">
+      <div class="brand">
+        <div class="brand-mark">RGD</div>
+        <div>
+          <h1>War Chat</h1>
+          <p>Sign in, chat, and conquer the map.</p>
+        </div>
       </div>
-      <p class="auth-subtitle">ROYAL'S GAME DEV — CHAT</p>
 
       <div class="tab-row">
-        <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">LOGIN</button>
-        <button class="tab-btn" id="tab-signup" onclick="switchTab('signup')">SIGN UP</button>
+        <button id="tab-login" class="tab-btn active" type="button" onclick="switchTab('login')">Login</button>
+        <button id="tab-signup" class="tab-btn" type="button" onclick="switchTab('signup')">Sign up</button>
       </div>
 
-      <!-- LOGIN FORM -->
-      <div id="form-login" class="auth-form">
-        <div class="input-group">
-          <label>USERNAME</label>
-          <input type="text" id="login-username" placeholder="enter username" autocomplete="off" onkeydown="if(event.key==='Enter') handleLogin()" />
-        </div>
-        <div class="input-group">
-          <label>PASSWORD</label>
-          <input type="password" id="login-password" placeholder="••••••••" onkeydown="if(event.key==='Enter') handleLogin()" />
-        </div>
-        <div id="login-error" class="error-msg"></div>
-        <button class="submit-btn" onclick="handleLogin()"><span>LOGIN</span></button>
-      </div>
+      <form id="form-login" class="auth-form" onsubmit="event.preventDefault(); handleLogin();">
+        <label>
+          Username
+          <input id="login-username" type="text" autocomplete="username" placeholder="your username" />
+        </label>
+        <label>
+          Password
+          <input id="login-password" type="password" autocomplete="current-password" placeholder="password" />
+        </label>
+        <p id="login-error" class="error-msg"></p>
+        <button class="primary-btn" type="submit">Login</button>
+      </form>
 
-      <!-- SIGNUP FORM — no email field -->
-      <div id="form-signup" class="auth-form hidden">
-        <div class="input-group">
-          <label>USERNAME</label>
-          <input type="text" id="signup-username" placeholder="choose a username" autocomplete="off" onkeydown="if(event.key==='Enter') handleSignup()" />
-        </div>
-        <div class="input-group">
-          <label>PASSWORD</label>
-          <input type="password" id="signup-password" placeholder="min. 6 characters" onkeydown="if(event.key==='Enter') handleSignup()" />
-        </div>
-        <div id="signup-error" class="error-msg"></div>
-        <button class="submit-btn" onclick="handleSignup()"><span>CREATE ACCOUNT</span></button>
-      </div>
-    </div>
-  </div>
+      <form id="form-signup" class="auth-form hidden" onsubmit="event.preventDefault(); handleSignup();">
+        <label>
+          Username
+          <input id="signup-username" type="text" autocomplete="username" placeholder="letters, numbers, underscore" />
+        </label>
+        <label>
+          Password
+          <input id="signup-password" type="password" autocomplete="new-password" placeholder="at least 6 characters" />
+        </label>
+        <p id="signup-error" class="error-msg"></p>
+        <button class="primary-btn" type="submit">Create Account</button>
+      </form>
+    </section>
+  </main>
 
-  <!-- CHAT SCREEN -->
-  <div id="chat-screen" class="screen">
-    <div class="chat-bg"><div class="grid-overlay"></div></div>
+  <main id="app-screen" class="screen">
+    <aside class="left-rail">
+      <div class="rail-brand">RGD</div>
+      <button id="view-chat" class="rail-btn active" type="button" onclick="setView('chat')">Chat</button>
+      <button id="view-war" class="rail-btn" type="button" onclick="setView('war')">War</button>
+      <button class="rail-btn logout" type="button" onclick="handleLogout()">Logout</button>
+    </aside>
 
-    <header class="chat-header">
-      <div class="header-left">
-        <span class="logo-small">[RGD]</span>
-        <span class="channel-name">#general</span>
-      </div>
-      <div class="header-right">
-        <div class="online-indicator">
-          <span class="online-dot"></span>
-          <span id="online-count">0</span> online
+    <section id="chat-view" class="view active">
+      <header class="top-bar">
+        <div>
+          <h2>Global Chat</h2>
+          <p><span id="online-count">0</span> online</p>
         </div>
-        <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
-      </div>
-    </header>
+        <ul id="online-list" class="online-list"></ul>
+      </header>
 
-    <div class="chat-body">
-      <div class="online-sidebar">
-        <div class="sidebar-title">ONLINE</div>
-        <ul id="online-list"></ul>
-      </div>
-      <div class="chat-main">
-        <div id="messages" class="messages"></div>
-        <div class="input-bar">
-          <input type="text" id="msg-input" placeholder="send a message..." autocomplete="off" onkeydown="if(event.key==='Enter') sendMessage()" />
-          <button class="send-btn" onclick="sendMessage()">SEND</button>
+      <div id="messages" class="messages"></div>
+
+      <form class="message-form" onsubmit="event.preventDefault(); sendMessage();">
+        <input id="msg-input" type="text" autocomplete="off" placeholder="Message the realm..." />
+        <button class="primary-btn" type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="war-view" class="view">
+      <header class="top-bar">
+        <div>
+          <h2>Conquest Map</h2>
+          <p id="war-status">Loading your kingdom...</p>
         </div>
+        <div class="war-actions">
+          <button class="ghost-btn" type="button" onclick="advanceDay()">Next Day</button>
+          <button class="primary-btn" type="button" onclick="saveGame()">Save</button>
+        </div>
+      </header>
+
+      <div class="war-layout">
+        <section class="map-panel">
+          <div id="map-grid" class="map-grid"></div>
+        </section>
+
+        <aside class="war-panel">
+          <div class="stat-grid">
+            <div><span>Money</span><strong id="stat-money">$0</strong></div>
+            <div><span>Food</span><strong id="stat-food">0</strong></div>
+            <div><span>Water</span><strong id="stat-water">0</strong></div>
+            <div><span>Population</span><strong id="stat-population">0</strong></div>
+            <div><span>Soldiers</span><strong id="stat-soldiers">0</strong></div>
+            <div><span>Avg Power</span><strong id="stat-power">0</strong></div>
+            <div><span>Land</span><strong id="stat-land">0</strong></div>
+            <div><span>Day</span><strong id="stat-day">1</strong></div>
+          </div>
+
+          <div id="selected-state" class="selected-state"></div>
+
+          <div class="control-block">
+            <h3>Buy Resources</h3>
+            <div class="inline-controls">
+              <button type="button" onclick="buyResource('food')">+50 Food $25</button>
+              <button type="button" onclick="buyResource('water')">+50 Water $25</button>
+            </div>
+          </div>
+
+          <div class="control-block">
+            <h3>Recruit</h3>
+            <label>
+              Soldiers to train
+              <input id="recruit-count" type="number" min="1" max="50" value="1" />
+            </label>
+            <button type="button" onclick="recruitSoldiers()">Recruit $20 each</button>
+          </div>
+
+          <div class="control-block">
+            <h3>Move Soldiers</h3>
+            <label>
+              Soldiers to station
+              <input id="move-count" type="number" min="1" value="1" />
+            </label>
+            <button type="button" onclick="moveSoldiersToSelectedState()">Move to Owned State</button>
+          </div>
+
+          <div class="control-block">
+            <h3>Attack</h3>
+            <label>
+              Soldiers to send
+              <input id="attack-count" type="number" min="1" value="1" />
+            </label>
+            <button class="danger-btn" type="button" onclick="attackSelectedState()">Attack Selected State</button>
+          </div>
+
+          <div class="control-block">
+            <h3>Battle Log</h3>
+            <div id="battle-log" class="battle-log"></div>
+          </div>
+        </aside>
       </div>
-    </div>
-  </div>
+    </section>
+  </main>
 
   <script type="module" src="app.js"></script>
 </body>

@@ -1,271 +1,605 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
-// ─────────────────────────────────────────────
-// SUPABASE SETUP
-// ─────────────────────────────────────────────
 const supabase = createClient(
   "https://jhfyvpwiutuztvajcojq.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoZnl2cHdpdXR1enR2YWpjb2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2OTEwOTIsImV4cCI6MjA5NTI2NzA5Mn0.Bg3LCk02pYWyG3Rb1qIDZTmNA-LqqVXhCi2iNXOoJGY"
 );
 
-// fake email derived from username — user never sees this
 const fakeEmail = (username) => `${username.toLowerCase()}@rgd.chat`;
 
-// ─────────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────────
+let sessionUser = null;
 let currentUser = null;
+let currentPlayer = null;
+let allStates = [];
+let ownedStates = [];
+let selectedStateId = null;
 let presenceChannel = null;
+let messageChannel = null;
 
-// ─────────────────────────────────────────────
-// TAB SWITCHING
-// ─────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+
 window.switchTab = function(tab) {
-  document.getElementById("form-login").classList.toggle("hidden", tab !== "login");
-  document.getElementById("form-signup").classList.toggle("hidden", tab !== "signup");
-  document.getElementById("tab-login").classList.toggle("active", tab === "login");
-  document.getElementById("tab-signup").classList.toggle("active", tab === "signup");
+  $("form-login").classList.toggle("hidden", tab !== "login");
+  $("form-signup").classList.toggle("hidden", tab !== "signup");
+  $("tab-login").classList.toggle("active", tab === "login");
+  $("tab-signup").classList.toggle("active", tab === "signup");
 };
 
-// ─────────────────────────────────────────────
-// LOGIN
-// ─────────────────────────────────────────────
+window.setView = function(view) {
+  $("chat-view").classList.toggle("active", view === "chat");
+  $("war-view").classList.toggle("active", view === "war");
+  $("view-chat").classList.toggle("active", view === "chat");
+  $("view-war").classList.toggle("active", view === "war");
+  if (view === "war") refreshGame();
+};
+
 window.handleLogin = async function() {
-  const username = document.getElementById("login-username").value.trim();
-  const password = document.getElementById("login-password").value;
-  const errEl = document.getElementById("login-error");
+  const username = $("login-username").value.trim();
+  const password = $("login-password").value;
+  const errEl = $("login-error");
   errEl.textContent = "";
 
-  if (!username || !password) { errEl.textContent = "! fill in all fields"; return; }
+  if (!username || !password) {
+    errEl.textContent = "Fill in all fields.";
+    return;
+  }
 
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: fakeEmail(username),
     password,
   });
 
   if (error) {
-    errEl.textContent = "! incorrect username or password";
+    errEl.textContent = "Incorrect username or password.";
     return;
   }
 
-  currentUser = username;
-  enterChat();
+  sessionUser = data.user;
+  await loadProfileAndEnter();
 };
 
-// ─────────────────────────────────────────────
-// SIGNUP
-// ─────────────────────────────────────────────
 window.handleSignup = async function() {
-  const username = document.getElementById("signup-username").value.trim();
-  const password = document.getElementById("signup-password").value;
-  const errEl = document.getElementById("signup-error");
+  const username = $("signup-username").value.trim();
+  const password = $("signup-password").value;
+  const errEl = $("signup-error");
   errEl.textContent = "";
 
-  if (!username || !password) { errEl.textContent = "! fill in all fields"; return; }
-  if (password.length < 6) { errEl.textContent = "! password must be 6+ characters"; return; }
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) { errEl.textContent = "! username: letters, numbers, _ only"; return; }
+  if (!username || !password) {
+    errEl.textContent = "Fill in all fields.";
+    return;
+  }
+  if (!/^[a-zA-Z0-9_]{3,16}$/.test(username)) {
+    errEl.textContent = "Username must be 3-16 letters, numbers, or underscores.";
+    return;
+  }
+  if (password.length < 6) {
+    errEl.textContent = "Password must be at least 6 characters.";
+    return;
+  }
 
-  // check username not already taken
   const { data: existing } = await supabase
     .from("profiles")
     .select("username")
     .eq("username", username)
-    .single();
+    .maybeSingle();
 
-  if (existing) { errEl.textContent = "! username already taken"; return; }
+  if (existing) {
+    errEl.textContent = "That username is already taken.";
+    return;
+  }
 
-  // create auth account with fake email
   const { data, error } = await supabase.auth.signUp({
     email: fakeEmail(username),
     password,
   });
 
-  if (error) { errEl.textContent = "! " + error.message; return; }
+  if (error) {
+    errEl.textContent = error.message;
+    return;
+  }
 
-  // save profile
+  sessionUser = data.user;
+
   const { error: profileErr } = await supabase.from("profiles").insert({
-    id: data.user.id,
+    id: sessionUser.id,
     username,
   });
 
-  if (profileErr) { errEl.textContent = "! " + profileErr.message; return; }
+  if (profileErr) {
+    errEl.textContent = profileErr.message;
+    return;
+  }
 
-  currentUser = username;
-  enterChat();
+  await loadProfileAndEnter();
 };
 
-// ─────────────────────────────────────────────
-// LOGOUT
-// ─────────────────────────────────────────────
 window.handleLogout = async function() {
   if (presenceChannel) await supabase.removeChannel(presenceChannel);
+  if (messageChannel) await supabase.removeChannel(messageChannel);
   await supabase.auth.signOut();
+  sessionUser = null;
   currentUser = null;
-  document.getElementById("messages").innerHTML = "";
-  document.getElementById("online-list").innerHTML = "";
-  document.getElementById("online-count").textContent = "0";
+  currentPlayer = null;
+  $("messages").innerHTML = "";
+  $("online-list").innerHTML = "";
+  $("online-count").textContent = "0";
   showScreen("auth-screen");
 };
 
-// ─────────────────────────────────────────────
-// ENTER CHAT
-// ─────────────────────────────────────────────
-function enterChat() {
-  showScreen("chat-screen");
-  loadMessages();
+async function loadProfileAndEnter() {
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("username")
+    .eq("id", sessionUser.id)
+    .single();
+
+  if (error || !profile) return;
+  currentUser = profile.username;
+  showScreen("app-screen");
+  await Promise.all([loadMessages(), setupGame()]);
   subscribeToMessages();
   trackPresence();
 }
 
-// ─────────────────────────────────────────────
-// LOAD PAST MESSAGES
-// ─────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach((screen) => screen.classList.remove("active"));
+  $(id).classList.add("active");
+}
+
 async function loadMessages() {
   const { data, error } = await supabase
     .from("messages")
     .select("*")
     .order("created_at", { ascending: true })
-    .limit(100);
+    .limit(120);
 
-  if (error) { console.error(error); return; }
-  document.getElementById("messages").innerHTML = "";
-  data.forEach(m => appendMessage(m));
+  if (error) return console.error(error);
+
+  $("messages").innerHTML = "";
+  data.forEach(appendMessage);
   scrollToBottom();
 }
 
-// ─────────────────────────────────────────────
-// REAL-TIME NEW MESSAGES
-// ─────────────────────────────────────────────
 function subscribeToMessages() {
-  supabase
-    .channel("realtime:messages")
-    .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "messages"
-      },
-      (payload) => {
-        if (payload.new.username !== currentUser) {
-          appendMessage(payload.new);
-          scrollToBottom();
-        }
-      }
-    )
-    .subscribe((status) => {
-      console.log("Realtime status:", status);
-    });
+  if (messageChannel) supabase.removeChannel(messageChannel);
+
+  messageChannel = supabase
+    .channel("messages-feed")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
+      appendMessage(payload.new);
+      scrollToBottom();
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, (payload) => {
+      const oldNode = document.querySelector(`[data-message-id="${payload.new.id}"]`);
+      if (oldNode) oldNode.remove();
+      appendMessage(payload.new);
+      scrollToBottom();
+    })
+    .subscribe();
 }
 
-// ─────────────────────────────────────────────
-// SEND MESSAGE
-// ─────────────────────────────────────────────
 window.sendMessage = async function() {
-  const input = document.getElementById("msg-input");
+  const input = $("msg-input");
   const text = input.value.trim();
-  if (!text) return;
+  if (!text || !sessionUser) return;
   input.value = "";
 
-  appendMessage({ username: currentUser, content: text, created_at: new Date().toISOString() });
-  scrollToBottom();
-
   const { error } = await supabase.from("messages").insert({
+    user_id: sessionUser.id,
     username: currentUser,
     content: text,
   });
 
-  if (error) console.error("Send failed:", error.message);
+  if (error) {
+    input.value = text;
+    console.error("Send failed:", error.message);
+  }
 };
 
-// ─────────────────────────────────────────────
-// PRESENCE (online users)
-// ─────────────────────────────────────────────
+window.deleteMessage = async function(id) {
+  const { error } = await supabase
+    .from("messages")
+    .update({ deleted: true, content: "" })
+    .eq("id", id)
+    .eq("user_id", sessionUser.id);
+
+  if (error) console.error("Delete failed:", error.message);
+};
+
+function appendMessage(msg) {
+  const container = $("messages");
+  if (document.querySelector(`[data-message-id="${msg.id}"]`)) return;
+
+  const isOwn = msg.user_id === sessionUser?.id || msg.username === currentUser;
+  const div = document.createElement("div");
+  div.className = `msg${isOwn ? " own" : ""}`;
+  div.dataset.messageId = msg.id || crypto.randomUUID();
+
+  const timeStr = msg.created_at
+    ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+
+  const text = msg.deleted ? "<em>Message deleted</em>" : escapeHTML(msg.content);
+  const deleteButton = isOwn && !msg.deleted
+    ? `<button class="delete-msg" type="button" onclick="deleteMessage('${msg.id}')">Delete</button>`
+    : "";
+
+  div.innerHTML = `
+    <div class="msg-avatar">${escapeHTML(msg.username).charAt(0).toUpperCase()}</div>
+    <div class="msg-bubble">
+      <div class="msg-meta">
+        <span class="msg-username">${escapeHTML(msg.username)}</span>
+        <span class="msg-time">${timeStr}</span>
+        ${deleteButton}
+      </div>
+      <div class="msg-text">${text}</div>
+    </div>
+  `;
+  container.appendChild(div);
+}
+
 function trackPresence() {
+  if (presenceChannel) supabase.removeChannel(presenceChannel);
+
   presenceChannel = supabase.channel("online-users", {
     config: { presence: { key: currentUser } },
   });
 
   presenceChannel
     .on("presence", { event: "sync" }, () => {
-      const state = presenceChannel.presenceState();
-      updateOnlineUsers(Object.keys(state));
+      updateOnlineUsers(Object.keys(presenceChannel.presenceState()));
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await presenceChannel.track({ username: currentUser });
+        await presenceChannel.track({ username: currentUser, at: new Date().toISOString() });
       }
     });
 }
 
 function updateOnlineUsers(users) {
-  const list = document.getElementById("online-list");
-  document.getElementById("online-count").textContent = users.length;
-  list.innerHTML = "";
-  users.forEach(username => {
+  $("online-count").textContent = users.length;
+  $("online-list").innerHTML = "";
+  users.sort().forEach((username) => {
     const li = document.createElement("li");
     li.textContent = username;
-    list.appendChild(li);
+    $("online-list").appendChild(li);
   });
 }
 
-// ─────────────────────────────────────────────
-// RENDER A MESSAGE
-// ─────────────────────────────────────────────
-function appendMessage(msg) {
-  const container = document.getElementById("messages");
-  const isOwn = msg.username === currentUser;
-  const timeStr = msg.created_at
-    ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : "";
-
-  const div = document.createElement("div");
-  div.className = `msg${isOwn ? " own" : ""}`;
-  div.innerHTML = `
-    <div class="msg-avatar">${escapeHTML(msg.username).charAt(0).toUpperCase()}</div>
-    <div class="msg-content">
-      <div class="msg-meta">
-        <span class="msg-username">${escapeHTML(msg.username)}</span>
-        <span class="msg-time">${timeStr}</span>
-      </div>
-      <div class="msg-text">${escapeHTML(msg.content)}</div>
-    </div>
-  `;
-  container.appendChild(div);
+async function setupGame() {
+  await loadStates();
+  await loadOrCreatePlayer();
+  await refreshGame();
 }
 
-// ─────────────────────────────────────────────
-// UTILITIES
-// ─────────────────────────────────────────────
-function showScreen(id) {
-  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
-  document.getElementById(id).classList.add("active");
+async function loadStates() {
+  const { data, error } = await supabase.from("states").select("*").order("y").order("x");
+  if (error) return console.error(error);
+  allStates = data || [];
+}
+
+async function loadOrCreatePlayer() {
+  const { data } = await supabase
+    .from("players")
+    .select("*")
+    .eq("id", sessionUser.id)
+    .maybeSingle();
+
+  if (data) {
+    currentPlayer = data;
+    return;
+  }
+
+  const starterState = allStates.reduce((best, state) => (
+    !best || state.soldiers < best.soldiers ? state : best
+  ), null);
+
+  const { data: created, error } = await supabase
+    .from("players")
+    .insert({
+      id: sessionUser.id,
+      username: currentUser,
+      money: 100,
+      food: 100,
+      water: 100,
+      population: 10,
+      soldiers: 3,
+      soldier_power: 1,
+      day: 1,
+    })
+    .select()
+    .single();
+
+  if (error) return console.error(error);
+  currentPlayer = created;
+
+  if (starterState) {
+    await supabase.from("player_states").insert({
+      player_id: sessionUser.id,
+      state_id: starterState.id,
+      soldiers: 3,
+    });
+    selectedStateId = starterState.id;
+  }
+}
+
+async function refreshGame() {
+  if (!sessionUser) return;
+
+  const [{ data: player }, { data: owned }] = await Promise.all([
+    supabase.from("players").select("*").eq("id", sessionUser.id).single(),
+    supabase.from("player_states").select("*").eq("player_id", sessionUser.id),
+  ]);
+
+  currentPlayer = player || currentPlayer;
+  ownedStates = owned || [];
+  selectedStateId = selectedStateId || ownedStates[0]?.state_id || allStates[0]?.id;
+
+  renderStats();
+  renderMap();
+  renderSelectedState();
+}
+
+function renderStats() {
+  const land = ownedStates.length;
+  $("stat-money").textContent = `$${Math.floor(currentPlayer.money)}`;
+  $("stat-food").textContent = Math.floor(currentPlayer.food);
+  $("stat-water").textContent = Math.floor(currentPlayer.water);
+  $("stat-population").textContent = currentPlayer.population;
+  $("stat-soldiers").textContent = currentPlayer.soldiers;
+  $("stat-power").textContent = Number(currentPlayer.soldier_power).toFixed(1);
+  $("stat-land").textContent = land;
+  $("stat-day").textContent = currentPlayer.day;
+  $("war-status").textContent = `${currentUser}'s kingdom controls ${land} state${land === 1 ? "" : "s"}.`;
+}
+
+function renderMap() {
+  const ownedIds = new Set(ownedStates.map((state) => state.state_id));
+  $("map-grid").innerHTML = "";
+
+  allStates.forEach((state) => {
+    const owned = ownedIds.has(state.id);
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = `state-tile ${owned ? "owned" : "enemy"} ${state.id === selectedStateId ? "selected" : ""}`;
+    tile.onclick = () => {
+      selectedStateId = state.id;
+      renderMap();
+      renderSelectedState();
+    };
+    tile.innerHTML = `
+      <div>
+        <div class="state-name">${escapeHTML(state.name)}</div>
+        <div class="state-owner">${owned ? "Your land" : "Unconquered"}</div>
+      </div>
+      <div class="state-stats">
+        <span>Soldiers: ${owned ? getOwnedState(state.id)?.soldiers || 0 : state.soldiers}</span>
+        <span>Power: ${Number(state.soldier_power).toFixed(1)}</span>
+        <span>Loot: $${state.money} / ${state.food} food / ${state.water} water</span>
+      </div>
+    `;
+    $("map-grid").appendChild(tile);
+  });
+}
+
+function renderSelectedState() {
+  const state = getSelectedState();
+  if (!state) return;
+
+  const owned = getOwnedState(state.id);
+  $("selected-state").innerHTML = `
+    <h3>${escapeHTML(state.name)}</h3>
+    <p>${owned ? "You own this state." : "Enemy territory."}</p>
+    <p>Soldiers here: ${owned ? owned.soldiers : state.soldiers}</p>
+    <p>Soldier power: ${Number(state.soldier_power).toFixed(1)}</p>
+  `;
+}
+
+window.buyResource = async function(type) {
+  if (currentPlayer.money < 25) return addLog("Not enough money.");
+  const patch = { money: currentPlayer.money - 25 };
+  patch[type] = Number(currentPlayer[type]) + 50;
+  await updatePlayer(patch);
+  addLog(`Bought 50 ${type}.`);
+};
+
+window.recruitSoldiers = async function() {
+  const count = clampNumber($("recruit-count").value, 1, 50);
+  const cost = count * 20;
+
+  if (currentPlayer.money < cost) return addLog("Not enough money to recruit.");
+  if (currentPlayer.population < count) return addLog("Not enough population to recruit.");
+
+  await updatePlayer({
+    money: currentPlayer.money - cost,
+    population: currentPlayer.population - count,
+    soldiers: currentPlayer.soldiers + count,
+  });
+  addLog(`Recruited ${count} soldier${count === 1 ? "" : "s"}.`);
+};
+
+window.advanceDay = async function() {
+  const popGain = Math.random() < 0.1 ? Math.ceil(currentPlayer.population * 0.1) : 0;
+  const consumptionRate = 0.8 + Math.random() * 0.5;
+  const consumed = Math.ceil(currentPlayer.population * consumptionRate);
+
+  const food = Math.max(0, Number(currentPlayer.food) - consumed);
+  const water = Math.max(0, Number(currentPlayer.water) - consumed);
+  const starving = food === 0 || water === 0;
+  const populationLoss = starving ? Math.ceil(currentPlayer.population * 0.1) : 0;
+
+  await updatePlayer({
+    day: currentPlayer.day + 1,
+    food,
+    water,
+    population: Math.max(1, currentPlayer.population + popGain - populationLoss),
+    money: Number(currentPlayer.money) + ownedStates.length * 10,
+  });
+
+  addLog(`Day advanced. Used ${consumed} food and water.${popGain ? ` Population grew by ${popGain}.` : ""}${starving ? " Shortages hurt your population." : ""}`);
+};
+
+window.attackSelectedState = async function() {
+  const state = getSelectedState();
+  if (!state) return;
+  if (getOwnedState(state.id)) return addLog("You already own this state.");
+
+  const sent = clampNumber($("attack-count").value, 1, currentPlayer.soldiers);
+  if (sent > currentPlayer.soldiers) return addLog("You do not have that many soldiers.");
+
+  const result = simulateBattle({
+    attackerCount: sent,
+    attackerPower: Number(currentPlayer.soldier_power),
+    defenderCount: state.soldiers,
+    defenderPower: Number(state.soldier_power),
+  });
+
+  let patch = {
+    soldiers: currentPlayer.soldiers - sent + result.attackerRemaining,
+  };
+
+  if (result.won) {
+    const powerGain = result.powerGain;
+    patch = {
+      ...patch,
+      money: Number(currentPlayer.money) + Number(state.money),
+      food: Number(currentPlayer.food) + Number(state.food),
+      water: Number(currentPlayer.water) + Number(state.water),
+      soldier_power: Number(currentPlayer.soldier_power) + powerGain,
+    };
+
+    await supabase.from("player_states").insert({
+      player_id: sessionUser.id,
+      state_id: state.id,
+      soldiers: Math.max(1, result.attackerRemaining),
+    });
+  }
+
+  await updatePlayer(patch);
+  await supabase.from("battles").insert({
+    player_id: sessionUser.id,
+    state_id: state.id,
+    result: result.won ? "won" : "lost",
+    report: result.report,
+  });
+
+  addLog(result.report);
+};
+
+window.moveSoldiersToSelectedState = async function() {
+  const state = getSelectedState();
+  const owned = state ? getOwnedState(state.id) : null;
+  if (!state || !owned) return addLog("Select one of your own states first.");
+
+  const count = clampNumber($("move-count").value, 1, currentPlayer.soldiers);
+  if (count > currentPlayer.soldiers) return addLog("You do not have that many free soldiers.");
+
+  const { error } = await supabase
+    .from("player_states")
+    .update({ soldiers: owned.soldiers + count })
+    .eq("player_id", sessionUser.id)
+    .eq("state_id", state.id);
+
+  if (error) return console.error(error);
+  await updatePlayer({ soldiers: currentPlayer.soldiers - count });
+  addLog(`Moved ${count} soldier${count === 1 ? "" : "s"} to ${state.name}.`);
+};
+
+window.saveGame = async function() {
+  await updatePlayer({});
+  addLog("Game saved.");
+};
+
+async function updatePlayer(patch) {
+  const { data, error } = await supabase
+    .from("players")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", sessionUser.id)
+    .select()
+    .single();
+
+  if (error) return console.error(error);
+  currentPlayer = data;
+  await refreshGame();
+}
+
+function simulateBattle({ attackerCount, attackerPower, defenderCount, defenderPower }) {
+  let attackers = makeSoldiers(attackerCount, attackerPower);
+  let defenders = makeSoldiers(defenderCount, defenderPower);
+  let totalHealthLost = 0;
+  let seconds = 0;
+
+  while (attackers.length && defenders.length && seconds < 5000) {
+    const a = attackers[0];
+    const d = defenders[0];
+    a.hp -= defenderPower + 1;
+    d.hp -= attackerPower + 1;
+    seconds += 1;
+
+    if (a.hp <= 0) attackers.shift();
+    if (d.hp <= 0) defenders.shift();
+  }
+
+  attackers.forEach((soldier) => {
+    totalHealthLost += Math.max(0, soldier.maxHp - soldier.hp);
+  });
+
+  const won = attackers.length > 0;
+  const remaining = attackers.length;
+  const powerGain = won && remaining ? totalHealthLost / (10 * remaining) : 0;
+
+  return {
+    won,
+    attackerRemaining: remaining,
+    powerGain,
+    report: won
+      ? `Victory! ${remaining} soldier${remaining === 1 ? "" : "s"} survived and gained ${powerGain.toFixed(2)} average power.`
+      : "Defeat. Your attacking soldiers were lost.",
+  };
+}
+
+function makeSoldiers(count, power) {
+  return Array.from({ length: count }, () => {
+    const hp = power * 10 + 20;
+    return { hp, maxHp: hp };
+  });
+}
+
+function getSelectedState() {
+  return allStates.find((state) => state.id === selectedStateId);
+}
+
+function getOwnedState(id) {
+  return ownedStates.find((state) => state.state_id === id);
+}
+
+function addLog(text) {
+  const p = document.createElement("p");
+  p.textContent = text;
+  $("battle-log").prepend(p);
 }
 
 function scrollToBottom() {
-  const el = document.getElementById("messages");
-  el.scrollTop = el.scrollHeight;
+  $("messages").scrollTop = $("messages").scrollHeight;
+}
+
+function clampNumber(value, min, max) {
+  const number = Math.floor(Number(value));
+  if (Number.isNaN(number)) return min;
+  return Math.max(min, Math.min(max, number));
 }
 
 function escapeHTML(str) {
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-// ─────────────────────────────────────────────
-// AUTO-LOGIN if session still active
-// ─────────────────────────────────────────────
 supabase.auth.getSession().then(async ({ data: { session } }) => {
-  if (session) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("username")
-      .eq("id", session.user.id)
-      .single();
-
-    if (profile) {
-      currentUser = profile.username;
-      enterChat();
-    }
-  }
+  if (!session) return;
+  sessionUser = session.user;
+  await loadProfileAndEnter();
 });
