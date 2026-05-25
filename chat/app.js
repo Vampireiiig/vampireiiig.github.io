@@ -12,6 +12,9 @@ let currentUser = null;
 let currentPlayer = null;
 let allStates = [];
 let ownedStates = [];
+let allPlayers = [];
+let tradeOffers = [];
+let mapCells = [];
 let selectedStateId = null;
 let presenceChannel = null;
 let messageChannel = null;
@@ -20,6 +23,8 @@ let pendingUsername = null;
 
 const DAY_LENGTH_MS = 12 * 60 * 60 * 1000;
 const NEXT_DAY_UNLOCK_MS = 6 * 60 * 60 * 1000;
+const MAP_WIDTH = 30;
+const MAP_HEIGHT = 20;
 const FALLBACK_STATES = [
   { id: "northwatch", name: "Northwatch", x: 1, y: 1, soldiers: 7, soldier_power: 2, money: 60, food: 90, water: 70 },
   { id: "ironfield", name: "Ironfield", x: 2, y: 1, soldiers: 10, soldier_power: 2, money: 110, food: 80, water: 55 },
@@ -314,6 +319,7 @@ function updateOnlineUsers(users) {
 
 async function setupGame() {
   await loadStates();
+  buildMapCells();
   await loadOrCreatePlayer();
   await refreshGame();
 }
@@ -392,18 +398,24 @@ async function fixOldStarterKitIfNeeded() {
 async function refreshGame() {
   if (!sessionUser) return;
 
-  const [{ data: player }, { data: owned }] = await Promise.all([
+  const [{ data: player }, { data: owned }, { data: players }, { data: trades }] = await Promise.all([
     supabase.from("players").select("*").eq("id", sessionUser.id).single(),
     supabase.from("player_states").select("*").eq("player_id", sessionUser.id),
+    supabase.from("profiles").select("username").order("username"),
+    supabase.from("trade_offers").select("*").order("created_at", { ascending: false }).limit(50),
   ]);
 
   currentPlayer = player || currentPlayer;
   ownedStates = owned || [];
+  allPlayers = (players || []).filter((playerRow) => playerRow.username !== currentUser);
+  tradeOffers = trades || [];
   selectedStateId = selectedStateId || ownedStates[0]?.state_id || allStates[0]?.id;
 
   renderStats();
   renderMap();
   renderSelectedState();
+  renderTradeControls();
+  renderTradeOffers();
   updateNextDayButton();
 }
 
@@ -424,27 +436,30 @@ function renderMap() {
   const ownedIds = new Set(ownedStates.map((state) => state.state_id));
   $("map-grid").innerHTML = "";
 
-  allStates.forEach((state) => {
+  mapCells.forEach((cell) => {
+    const state = allStates.find((item) => item.id === cell.stateId);
+    if (!state) return;
     const owned = ownedIds.has(state.id);
     const tile = document.createElement("button");
     tile.type = "button";
-    tile.className = `state-tile ${owned ? "owned" : "enemy"} ${state.id === selectedStateId ? "selected" : ""}`;
+    tile.className = [
+      "map-cell",
+      owned ? "owned" : "enemy",
+      state.id === selectedStateId ? "selected" : "",
+      cell.edges.top ? "edge-top" : "",
+      cell.edges.right ? "edge-right" : "",
+      cell.edges.bottom ? "edge-bottom" : "",
+      cell.edges.left ? "edge-left" : "",
+      cell.capital ? "capital" : "",
+    ].join(" ");
+    tile.style.backgroundColor = owned ? cell.ownedColor : cell.enemyColor;
+    tile.title = getStateDisplayName(state);
+    if (cell.capital) tile.dataset.label = getStateDisplayName(state);
     tile.onclick = () => {
       selectedStateId = state.id;
       renderMap();
       renderSelectedState();
     };
-    tile.innerHTML = `
-      <div>
-        <div class="state-name">${escapeHTML(state.name)}</div>
-        <div class="state-owner">${owned ? "Your land" : "Unconquered"}</div>
-      </div>
-      <div class="state-stats">
-        <span>Soldiers: ${owned ? getOwnedState(state.id)?.soldiers || 0 : state.soldiers}</span>
-        <span>Power: ${Number(state.soldier_power).toFixed(1)}</span>
-        <span>Loot: $${state.money} / ${state.food} food / ${state.water} water</span>
-      </div>
-    `;
     $("map-grid").appendChild(tile);
   });
 }
@@ -454,8 +469,9 @@ function renderSelectedState() {
   if (!state) return;
 
   const owned = getOwnedState(state.id);
+  $("rename-state-input").value = owned?.custom_name || "";
   $("selected-state").innerHTML = `
-    <h3>${escapeHTML(state.name)}</h3>
+    <h3>${escapeHTML(getStateDisplayName(state))}</h3>
     <p>${owned ? "You own this state." : "Enemy territory."}</p>
     <p>Soldiers here: ${owned ? owned.soldiers : state.soldiers}</p>
     <p>Soldier power: ${Number(state.soldier_power).toFixed(1)}</p>
@@ -468,6 +484,25 @@ window.buyResource = async function(type) {
   patch[type] = Number(currentPlayer[type]) + 50;
   await updatePlayer(patch);
   addLog(`Bought 50 ${type}.`);
+};
+
+window.renameSelectedState = async function() {
+  const state = getSelectedState();
+  const owned = state ? getOwnedState(state.id) : null;
+  if (!state || !owned) return addLog("You can only rename states you own.");
+
+  const customName = $("rename-state-input").value.trim();
+  if (customName.length < 2) return addLog("State name needs at least 2 characters.");
+
+  const { error } = await supabase
+    .from("player_states")
+    .update({ custom_name: customName })
+    .eq("player_id", sessionUser.id)
+    .eq("state_id", state.id);
+
+  if (error) return console.error(error);
+  addLog(`${state.name} renamed to ${customName}.`);
+  await refreshGame();
 };
 
 window.sellResource = async function(type) {
@@ -581,6 +616,139 @@ window.saveGame = async function() {
   addLog("Game saved.");
 };
 
+window.createTradeOffer = async function() {
+  const toUsername = $("trade-player").value;
+  if (!toUsername) return addLog("Choose a player to trade with.");
+
+  const offer = readTradeSide("offer");
+  const request = readTradeSide("ask");
+  if (!hasTradeValue(offer) && !hasTradeValue(request)) return addLog("Add something to offer or request.");
+  if (!canAffordTradeSide(offer, currentPlayer)) return addLog("You cannot offer more than you own.");
+
+  const { error } = await supabase.from("trade_offers").insert({
+    from_player: sessionUser.id,
+    from_username: currentUser,
+    to_username: toUsername,
+    offer,
+    request,
+  });
+
+  if (error) return console.error(error);
+  clearTradeForm();
+  addLog(`Trade offer sent to ${toUsername}.`);
+  await refreshGame();
+};
+
+window.acceptTradeOffer = async function(id) {
+  const { error } = await supabase.rpc("accept_trade_offer", { trade_id: id });
+  if (error) return addLog(`Trade failed: ${error.message}`);
+  addLog("Trade accepted.");
+  await refreshGame();
+};
+
+window.declineTradeOffer = async function(id) {
+  const { error } = await supabase
+    .from("trade_offers")
+    .update({ status: "declined" })
+    .eq("id", id);
+
+  if (error) return console.error(error);
+  addLog("Trade declined.");
+  await refreshGame();
+};
+
+function renderTradeControls() {
+  const playerSelect = $("trade-player");
+  playerSelect.innerHTML = `<option value="">Choose player</option>`;
+  allPlayers.forEach((player) => {
+    const option = document.createElement("option");
+    option.value = player.username;
+    option.textContent = player.username;
+    playerSelect.appendChild(option);
+  });
+
+  const landSelect = $("offer-land");
+  landSelect.innerHTML = `<option value="">No land</option>`;
+  ownedStates.forEach((owned) => {
+    const state = allStates.find((item) => item.id === owned.state_id);
+    if (!state) return;
+    const option = document.createElement("option");
+    option.value = state.id;
+    option.textContent = getStateDisplayName(state);
+    landSelect.appendChild(option);
+  });
+}
+
+function renderTradeOffers() {
+  const list = $("trade-list");
+  list.innerHTML = "";
+
+  if (!tradeOffers.length) {
+    list.innerHTML = `<p class="hint-text">No trade offers yet.</p>`;
+    return;
+  }
+
+  tradeOffers.forEach((trade) => {
+    const incoming = trade.to_username === currentUser;
+    const card = document.createElement("div");
+    card.className = "trade-card";
+    card.innerHTML = `
+      <strong>${incoming ? `${escapeHTML(trade.from_username)} offers` : `To ${escapeHTML(trade.to_username)}`}</strong>
+      <p>Status: ${escapeHTML(trade.status)}</p>
+      <p>They give: ${escapeHTML(formatTradeSide(trade.offer))}</p>
+      <p>They want: ${escapeHTML(formatTradeSide(trade.request))}</p>
+      ${incoming && trade.status === "pending" ? `
+        <div class="trade-actions">
+          <button class="primary-btn" type="button" onclick="acceptTradeOffer('${trade.id}')">Accept</button>
+          <button class="danger-btn" type="button" onclick="declineTradeOffer('${trade.id}')">Decline</button>
+        </div>
+      ` : ""}
+    `;
+    list.appendChild(card);
+  });
+}
+
+function readTradeSide(prefix) {
+  const landValue = prefix === "offer" ? $("offer-land").value : $("ask-land").value.trim();
+  return {
+    money: clampNumber($(`${prefix}-money`).value, 0, 1000000),
+    food: clampNumber($(`${prefix}-food`).value, 0, 1000000),
+    water: clampNumber($(`${prefix}-water`).value, 0, 1000000),
+    soldiers: clampNumber($(`${prefix}-soldiers`).value, 0, 1000000),
+    population: clampNumber($(`${prefix}-population`).value, 0, 1000000),
+    land: landValue || "",
+  };
+}
+
+function hasTradeValue(side) {
+  return side.money || side.food || side.water || side.soldiers || side.population || side.land;
+}
+
+function canAffordTradeSide(side, player) {
+  return side.money <= Number(player.money) &&
+    side.food <= Number(player.food) &&
+    side.water <= Number(player.water) &&
+    side.soldiers <= Number(player.soldiers) &&
+    side.population <= Number(player.population);
+}
+
+function formatTradeSide(side) {
+  const parts = [];
+  ["money", "food", "water", "soldiers", "population"].forEach((key) => {
+    if (Number(side?.[key]) > 0) parts.push(`${side[key]} ${key}`);
+  });
+  if (side?.land) parts.push(`land: ${side.land}`);
+  return parts.length ? parts.join(", ") : "nothing";
+}
+
+function clearTradeForm() {
+  ["offer-money", "offer-food", "offer-water", "offer-soldiers", "offer-population", "ask-money", "ask-food", "ask-water", "ask-soldiers", "ask-population"].forEach((id) => {
+    $(id).value = 0;
+  });
+  $("offer-land").value = "";
+  $("ask-land").value = "";
+}
+
 async function updatePlayer(patch) {
   const { data, error } = await supabase
     .from("players")
@@ -636,12 +804,86 @@ function makeSoldiers(count, power) {
   });
 }
 
+function buildMapCells() {
+  const seeds = allStates.map((state, index) => {
+    const rng = seededRandom(hashString(state.id));
+    return {
+      stateId: state.id,
+      x: Math.floor(((state.x - 0.5) / 3) * MAP_WIDTH + (rng() - 0.5) * 3),
+      y: Math.floor(((state.y - 0.5) / 3) * MAP_HEIGHT + (rng() - 0.5) * 3),
+      index,
+    };
+  });
+
+  const cells = [];
+  for (let y = 0; y < MAP_HEIGHT; y += 1) {
+    for (let x = 0; x < MAP_WIDTH; x += 1) {
+      const nearest = seeds.reduce((best, seed) => {
+        const wobble = Math.sin((x + seed.index) * 1.7) + Math.cos((y - seed.index) * 1.3);
+        const distance = (x - seed.x) ** 2 + (y - seed.y) ** 2 + wobble * 3;
+        return !best || distance < best.distance ? { seed, distance } : best;
+      }, null).seed;
+      cells.push({ x, y, stateId: nearest.stateId });
+    }
+  }
+
+  mapCells = cells.map((cell) => {
+    const same = (dx, dy) => cells.find((other) => other.x === cell.x + dx && other.y === cell.y + dy)?.stateId === cell.stateId;
+    const stateCells = cells.filter((other) => other.stateId === cell.stateId);
+    const center = stateCells.reduce((acc, item) => ({ x: acc.x + item.x, y: acc.y + item.y }), { x: 0, y: 0 });
+    center.x /= stateCells.length;
+    center.y /= stateCells.length;
+    const capital = stateCells.reduce((best, item) => {
+      const distance = (item.x - center.x) ** 2 + (item.y - center.y) ** 2;
+      return !best || distance < best.distance ? { item, distance } : best;
+    }, null).item;
+
+    return {
+      ...cell,
+      capital: capital.x === cell.x && capital.y === cell.y,
+      edges: {
+        top: !same(0, -1),
+        right: !same(1, 0),
+        bottom: !same(0, 1),
+        left: !same(-1, 0),
+      },
+      ownedColor: colorForState(cell.stateId, true),
+      enemyColor: colorForState(cell.stateId, false),
+    };
+  });
+}
+
+function colorForState(id, owned) {
+  const hue = hashString(id) % 360;
+  return owned ? `hsl(${hue} 48% 31%)` : `hsl(${hue} 38% 24%)`;
+}
+
+function hashString(text) {
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function seededRandom(seed) {
+  let value = seed || 1;
+  return () => {
+    value = (value * 1664525 + 1013904223) >>> 0;
+    return value / 4294967296;
+  };
+}
+
 function getSelectedState() {
   return allStates.find((state) => state.id === selectedStateId);
 }
 
 function getOwnedState(id) {
   return ownedStates.find((state) => state.state_id === id);
+}
+
+function getStateDisplayName(state) {
+  return getOwnedState(state.id)?.custom_name || state.name;
 }
 
 function addLog(text) {

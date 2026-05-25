@@ -127,6 +127,15 @@
           </div>
 
           <div class="control-block">
+            <h3>Rename State</h3>
+            <label>
+              New name
+              <input id="rename-state-input" type="text" maxlength="28" placeholder="owned states only" />
+            </label>
+            <button type="button" onclick="renameSelectedState()">Rename Owned State</button>
+          </div>
+
+          <div class="control-block">
             <h3>Move Soldiers</h3>
             <label>
               Soldiers to station
@@ -150,6 +159,33 @@
           </div>
         </aside>
       </div>
+
+      <section class="trade-dock">
+        <div class="trade-maker">
+          <h3>Make Trade Offer</h3>
+          <div class="trade-grid">
+            <label>To player <select id="trade-player"></select></label>
+            <label>Offer money <input id="offer-money" type="number" min="0" value="0" /></label>
+            <label>Offer food <input id="offer-food" type="number" min="0" value="0" /></label>
+            <label>Offer water <input id="offer-water" type="number" min="0" value="0" /></label>
+            <label>Offer soldiers <input id="offer-soldiers" type="number" min="0" value="0" /></label>
+            <label>Offer population <input id="offer-population" type="number" min="0" value="0" /></label>
+            <label>Offer land <select id="offer-land"></select></label>
+            <label>Ask money <input id="ask-money" type="number" min="0" value="0" /></label>
+            <label>Ask food <input id="ask-food" type="number" min="0" value="0" /></label>
+            <label>Ask water <input id="ask-water" type="number" min="0" value="0" /></label>
+            <label>Ask soldiers <input id="ask-soldiers" type="number" min="0" value="0" /></label>
+            <label>Ask population <input id="ask-population" type="number" min="0" value="0" /></label>
+            <label>Ask land name <input id="ask-land" type="text" placeholder="state name or blank" /></label>
+          </div>
+          <button class="primary-btn" type="button" onclick="createTradeOffer()">Send Trade Offer</button>
+        </div>
+
+        <div class="trade-list-wrap">
+          <h3>Trade Offers</h3>
+          <div id="trade-list" class="trade-list"></div>
+        </div>
+      </section>
     </section>
   </main>
 
