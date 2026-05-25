@@ -16,6 +16,7 @@ let selectedStateId = null;
 let presenceChannel = null;
 let messageChannel = null;
 let dayTimer = null;
+let pendingUsername = null;
 
 const DAY_LENGTH_MS = 12 * 60 * 60 * 1000;
 const NEXT_DAY_UNLOCK_MS = 6 * 60 * 60 * 1000;
@@ -70,6 +71,7 @@ window.handleLogin = async function() {
   }
 
   sessionUser = data.user;
+  pendingUsername = username;
   await loadProfileAndEnter();
 };
 
@@ -108,6 +110,11 @@ window.handleSignup = async function() {
     password,
   });
 
+  if (error?.message?.toLowerCase().includes("already registered")) {
+    errEl.textContent = "Account already exists. Use Login instead.";
+    return;
+  }
+
   if (error) {
     errEl.textContent = error.message;
     return;
@@ -143,13 +150,36 @@ window.handleLogout = async function() {
 };
 
 async function loadProfileAndEnter() {
-  const { data: profile, error } = await supabase
+  let { data: profile, error } = await supabase
     .from("profiles")
     .select("username")
     .eq("id", sessionUser.id)
-    .single();
+    .maybeSingle();
 
-  if (error || !profile) return;
+  if (error) {
+    console.error("Profile load failed:", error.message);
+    return;
+  }
+
+  if (!profile) {
+    const username = pendingUsername || sessionUser.email?.split("@")[0];
+    if (!username) return;
+
+    const { data: createdProfile, error: createProfileError } = await supabase
+      .from("profiles")
+      .insert({ id: sessionUser.id, username })
+      .select("username")
+      .single();
+
+    if (createProfileError) {
+      console.error("Profile repair failed:", createProfileError.message);
+      return;
+    }
+
+    profile = createdProfile;
+  }
+
+  pendingUsername = null;
   currentUser = profile.username;
   showScreen("app-screen");
   await Promise.all([loadMessages(), setupGame()]);
