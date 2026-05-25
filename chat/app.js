@@ -8,6 +8,9 @@ const supabase = createClient(
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoZnl2cHdpdXR1enR2YWpjb2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2OTEwOTIsImV4cCI6MjA5NTI2NzA5Mn0.Bg3LCk02pYWyG3Rb1qIDZTmNA-LqqVXhCi2iNXOoJGY"
 );
 
+// fake email derived from username — user never sees this
+const fakeEmail = (username) => `${username.toLowerCase()}@rgd.chat`;
+
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
@@ -35,24 +38,15 @@ window.handleLogin = async function() {
 
   if (!username || !password) { errEl.textContent = "! fill in all fields"; return; }
 
-  // look up their email from profiles table using username
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("email")
-    .eq("username", username)
-    .single();
-
-  if (profileErr || !profile) {
-    errEl.textContent = "! username not found";
-    return;
-  }
-
   const { error } = await supabase.auth.signInWithPassword({
-    email: profile.email,
+    email: fakeEmail(username),
     password,
   });
 
-  if (error) { errEl.textContent = "! " + error.message; return; }
+  if (error) {
+    errEl.textContent = "! incorrect username or password";
+    return;
+  }
 
   currentUser = username;
   enterChat();
@@ -63,13 +57,13 @@ window.handleLogin = async function() {
 // ─────────────────────────────────────────────
 window.handleSignup = async function() {
   const username = document.getElementById("signup-username").value.trim();
-  const email = document.getElementById("signup-email").value.trim();
   const password = document.getElementById("signup-password").value;
   const errEl = document.getElementById("signup-error");
   errEl.textContent = "";
 
-  if (!username || !email || !password) { errEl.textContent = "! fill in all fields"; return; }
+  if (!username || !password) { errEl.textContent = "! fill in all fields"; return; }
   if (password.length < 6) { errEl.textContent = "! password must be 6+ characters"; return; }
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) { errEl.textContent = "! username: letters, numbers, _ only"; return; }
 
   // check username not already taken
   const { data: existing } = await supabase
@@ -80,15 +74,18 @@ window.handleSignup = async function() {
 
   if (existing) { errEl.textContent = "! username already taken"; return; }
 
-  // create auth account
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // create auth account with fake email
+  const { data, error } = await supabase.auth.signUp({
+    email: fakeEmail(username),
+    password,
+  });
+
   if (error) { errEl.textContent = "! " + error.message; return; }
 
-  // save profile with username + email so login can look it up
+  // save profile
   const { error: profileErr } = await supabase.from("profiles").insert({
     id: data.user.id,
     username,
-    email,
   });
 
   if (profileErr) { errEl.textContent = "! " + profileErr.message; return; }
@@ -144,7 +141,6 @@ function subscribeToMessages() {
     .channel("public:messages")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" },
       (payload) => {
-        // don't double-render own messages (already shown optimistically)
         if (payload.new.username !== currentUser) {
           appendMessage(payload.new);
           scrollToBottom();
@@ -163,7 +159,6 @@ window.sendMessage = async function() {
   if (!text) return;
   input.value = "";
 
-  // optimistic render
   appendMessage({ username: currentUser, content: text, created_at: new Date().toISOString() });
   scrollToBottom();
 
@@ -186,21 +181,19 @@ function trackPresence() {
   presenceChannel
     .on("presence", { event: "sync" }, () => {
       const state = presenceChannel.presenceState();
-      const users = Object.keys(state);
-      updateOnlineUsers(users);
+      updateOnlineUsers(Object.keys(state));
     })
     .subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await presenceChannel.track({ username: currentUser, online_at: new Date().toISOString() });
+        await presenceChannel.track({ username: currentUser });
       }
     });
 }
 
 function updateOnlineUsers(users) {
   const list = document.getElementById("online-list");
-  const count = document.getElementById("online-count");
+  document.getElementById("online-count").textContent = users.length;
   list.innerHTML = "";
-  count.textContent = users.length;
   users.forEach(username => {
     const li = document.createElement("li");
     li.textContent = username;
@@ -221,7 +214,7 @@ function appendMessage(msg) {
   const div = document.createElement("div");
   div.className = `msg${isOwn ? " own" : ""}`;
   div.innerHTML = `
-    <div class="msg-avatar">${msg.username.charAt(0).toUpperCase()}</div>
+    <div class="msg-avatar">${escapeHTML(msg.username).charAt(0).toUpperCase()}</div>
     <div class="msg-content">
       <div class="msg-meta">
         <span class="msg-username">${escapeHTML(msg.username)}</span>

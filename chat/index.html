@@ -18,9 +18,7 @@
     </div>
     <div class="auth-box">
       <div class="auth-logo">
-        <span class="logo-bracket">[</span>
-        RGD
-        <span class="logo-bracket">]</span>
+        <span class="logo-bracket">[</span>RGD<span class="logo-bracket">]</span>
       </div>
       <p class="auth-subtitle">ROYAL'S GAME DEV — CHAT</p>
 
@@ -29,47 +27,39 @@
         <button class="tab-btn" id="tab-signup" onclick="switchTab('signup')">SIGN UP</button>
       </div>
 
+      <!-- LOGIN FORM -->
       <div id="form-login" class="auth-form">
         <div class="input-group">
           <label>USERNAME</label>
-          <input type="text" id="login-username" placeholder="enter username" autocomplete="off" />
+          <input type="text" id="login-username" placeholder="enter username" autocomplete="off" onkeydown="if(event.key==='Enter') handleLogin()" />
         </div>
         <div class="input-group">
           <label>PASSWORD</label>
-          <input type="password" id="login-password" placeholder="••••••••" />
+          <input type="password" id="login-password" placeholder="••••••••" onkeydown="if(event.key==='Enter') handleLogin()" />
         </div>
         <div id="login-error" class="error-msg"></div>
-        <button class="submit-btn" onclick="handleLogin()">
-          <span>LOGIN</span>
-        </button>
+        <button class="submit-btn" onclick="handleLogin()"><span>LOGIN</span></button>
       </div>
 
+      <!-- SIGNUP FORM — no email field -->
       <div id="form-signup" class="auth-form hidden">
         <div class="input-group">
           <label>USERNAME</label>
-          <input type="text" id="signup-username" placeholder="choose a username" autocomplete="off" />
-        </div>
-        <div class="input-group">
-          <label>EMAIL</label>
-          <input type="email" id="signup-email" placeholder="you@example.com" />
+          <input type="text" id="signup-username" placeholder="choose a username" autocomplete="off" onkeydown="if(event.key==='Enter') handleSignup()" />
         </div>
         <div class="input-group">
           <label>PASSWORD</label>
-          <input type="password" id="signup-password" placeholder="••••••••" />
+          <input type="password" id="signup-password" placeholder="min. 6 characters" onkeydown="if(event.key==='Enter') handleSignup()" />
         </div>
         <div id="signup-error" class="error-msg"></div>
-        <button class="submit-btn" onclick="handleSignup()">
-          <span>CREATE ACCOUNT</span>
-        </button>
+        <button class="submit-btn" onclick="handleSignup()"><span>CREATE ACCOUNT</span></button>
       </div>
     </div>
   </div>
 
   <!-- CHAT SCREEN -->
   <div id="chat-screen" class="screen">
-    <div class="chat-bg">
-      <div class="grid-overlay"></div>
-    </div>
+    <div class="chat-bg"><div class="grid-overlay"></div></div>
 
     <header class="chat-header">
       <div class="header-left">
@@ -90,7 +80,6 @@
         <div class="sidebar-title">ONLINE</div>
         <ul id="online-list"></ul>
       </div>
-
       <div class="chat-main">
         <div id="messages" class="messages"></div>
         <div class="input-bar">
