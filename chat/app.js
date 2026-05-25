@@ -138,8 +138,12 @@ async function loadMessages() {
 // ─────────────────────────────────────────────
 function subscribeToMessages() {
   supabase
-    .channel("public:messages")
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" },
+    .channel("realtime:messages")
+    .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "messages"
+      },
       (payload) => {
         if (payload.new.username !== currentUser) {
           appendMessage(payload.new);
@@ -147,7 +151,9 @@ function subscribeToMessages() {
         }
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      console.log("Realtime status:", status);
+    });
 }
 
 // ─────────────────────────────────────────────
