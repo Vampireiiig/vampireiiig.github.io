@@ -1,271 +1,199 @@
-// ─────────────────────────────────────────────
-// CONFIG — adjust these to match your server's routes
-// ─────────────────────────────────────────────
-const SERVER = "https://devserver-main--royalsgamedev.netlify.app";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
 
-const API = {
-  login:    `${SERVER}/api/auth/login`,
-  signup:   `${SERVER}/api/auth/signup`,
-  messages: `${SERVER}/api/messages`,
-  send:     `${SERVER}/api/messages`,
-  online:   `${SERVER}/api/online`,
-  ws:       SERVER.replace("https", "wss") + "/ws",
-};
+// ─────────────────────────────────────────────
+// SUPABASE SETUP
+// ─────────────────────────────────────────────
+const supabase = createClient(
+  "https://jhfyvpwiutuztvajcojq.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpoZnl2cHdpdXR1enR2YWpjb2pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2OTEwOTIsImV4cCI6MjA5NTI2NzA5Mn0.Bg3LCk02pYWyG3Rb1qIDZTmNA-LqqVXhCi2iNXOoJGY"
+);
 
 // ─────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────
 let currentUser = null;
-let token = null;
-let socket = null;
-let pollInterval = null;
+let presenceChannel = null;
 
 // ─────────────────────────────────────────────
 // TAB SWITCHING
 // ─────────────────────────────────────────────
-function switchTab(tab) {
+window.switchTab = function(tab) {
   document.getElementById("form-login").classList.toggle("hidden", tab !== "login");
   document.getElementById("form-signup").classList.toggle("hidden", tab !== "signup");
   document.getElementById("tab-login").classList.toggle("active", tab === "login");
   document.getElementById("tab-signup").classList.toggle("active", tab === "signup");
-}
+};
 
 // ─────────────────────────────────────────────
-// AUTH
+// LOGIN
 // ─────────────────────────────────────────────
-async function handleLogin() {
+window.handleLogin = async function() {
   const username = document.getElementById("login-username").value.trim();
   const password = document.getElementById("login-password").value;
   const errEl = document.getElementById("login-error");
   errEl.textContent = "";
 
-  if (!username || !password) {
-    errEl.textContent = "! fill in all fields";
+  if (!username || !password) { errEl.textContent = "! fill in all fields"; return; }
+
+  // look up their email from profiles table using username
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("username", username)
+    .single();
+
+  if (profileErr || !profile) {
+    errEl.textContent = "! username not found";
     return;
   }
 
-  try {
-    const res = await fetch(API.login, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
+  const { error } = await supabase.auth.signInWithPassword({
+    email: profile.email,
+    password,
+  });
 
-    const data = await res.json();
+  if (error) { errEl.textContent = "! " + error.message; return; }
 
-    if (!res.ok) {
-      errEl.textContent = "! " + (data.message || data.error || "login failed");
-      return;
-    }
+  currentUser = username;
+  enterChat();
+};
 
-    token = data.token || data.accessToken || null;
-    currentUser = data.user?.username || data.username || username;
-    enterChat();
-
-  } catch (err) {
-    errEl.textContent = "! could not reach server";
-    console.error(err);
-  }
-}
-
-async function handleSignup() {
+// ─────────────────────────────────────────────
+// SIGNUP
+// ─────────────────────────────────────────────
+window.handleSignup = async function() {
   const username = document.getElementById("signup-username").value.trim();
   const email = document.getElementById("signup-email").value.trim();
   const password = document.getElementById("signup-password").value;
   const errEl = document.getElementById("signup-error");
   errEl.textContent = "";
 
-  if (!username || !email || !password) {
-    errEl.textContent = "! fill in all fields";
-    return;
-  }
+  if (!username || !email || !password) { errEl.textContent = "! fill in all fields"; return; }
+  if (password.length < 6) { errEl.textContent = "! password must be 6+ characters"; return; }
 
-  try {
-    const res = await fetch(API.signup, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password }),
-    });
+  // check username not already taken
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("username")
+    .eq("username", username)
+    .single();
 
-    const data = await res.json();
+  if (existing) { errEl.textContent = "! username already taken"; return; }
 
-    if (!res.ok) {
-      errEl.textContent = "! " + (data.message || data.error || "signup failed");
-      return;
-    }
+  // create auth account
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) { errEl.textContent = "! " + error.message; return; }
 
-    token = data.token || data.accessToken || null;
-    currentUser = data.user?.username || data.username || username;
-    enterChat();
+  // save profile with username + email so login can look it up
+  const { error: profileErr } = await supabase.from("profiles").insert({
+    id: data.user.id,
+    username,
+    email,
+  });
 
-  } catch (err) {
-    errEl.textContent = "! could not reach server";
-    console.error(err);
-  }
-}
+  if (profileErr) { errEl.textContent = "! " + profileErr.message; return; }
 
-function handleLogout() {
+  currentUser = username;
+  enterChat();
+};
+
+// ─────────────────────────────────────────────
+// LOGOUT
+// ─────────────────────────────────────────────
+window.handleLogout = async function() {
+  if (presenceChannel) await supabase.removeChannel(presenceChannel);
+  await supabase.auth.signOut();
   currentUser = null;
-  token = null;
-  if (socket) socket.close();
-  if (pollInterval) clearInterval(pollInterval);
   document.getElementById("messages").innerHTML = "";
   document.getElementById("online-list").innerHTML = "";
   document.getElementById("online-count").textContent = "0";
   showScreen("auth-screen");
-}
+};
 
 // ─────────────────────────────────────────────
-// CHAT ENTRY
+// ENTER CHAT
 // ─────────────────────────────────────────────
 function enterChat() {
   showScreen("chat-screen");
   loadMessages();
-  connectWebSocket();
-  fetchOnlineUsers();
-  pollInterval = setInterval(() => {
-    fetchOnlineUsers();
-    // fallback polling if WebSocket not available
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-      loadMessages();
-    }
-  }, 5000);
+  subscribeToMessages();
+  trackPresence();
 }
 
 // ─────────────────────────────────────────────
-// MESSAGES
+// LOAD PAST MESSAGES
 // ─────────────────────────────────────────────
 async function loadMessages() {
-  try {
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const res = await fetch(API.messages, { headers });
-    if (!res.ok) return;
-    const data = await res.json();
-    const msgs = Array.isArray(data) ? data : (data.messages || []);
-    const container = document.getElementById("messages");
-    container.innerHTML = "";
-    msgs.forEach(m => appendMessage(m, false));
-    scrollToBottom();
-  } catch (err) {
-    console.error("Failed to load messages:", err);
-  }
+  const { data, error } = await supabase
+    .from("messages")
+    .select("*")
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  if (error) { console.error(error); return; }
+  document.getElementById("messages").innerHTML = "";
+  data.forEach(m => appendMessage(m));
+  scrollToBottom();
 }
 
-async function sendMessage() {
+// ─────────────────────────────────────────────
+// REAL-TIME NEW MESSAGES
+// ─────────────────────────────────────────────
+function subscribeToMessages() {
+  supabase
+    .channel("public:messages")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" },
+      (payload) => {
+        // don't double-render own messages (already shown optimistically)
+        if (payload.new.username !== currentUser) {
+          appendMessage(payload.new);
+          scrollToBottom();
+        }
+      }
+    )
+    .subscribe();
+}
+
+// ─────────────────────────────────────────────
+// SEND MESSAGE
+// ─────────────────────────────────────────────
+window.sendMessage = async function() {
   const input = document.getElementById("msg-input");
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
 
   // optimistic render
-  appendMessage({ username: currentUser, text, timestamp: new Date().toISOString() }, true);
+  appendMessage({ username: currentUser, content: text, created_at: new Date().toISOString() });
   scrollToBottom();
 
-  try {
-    const headers = { "Content-Type": "application/json" };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    await fetch(API.send, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ message: text, text, content: text }),
-    });
-  } catch (err) {
-    console.error("Failed to send:", err);
-  }
-}
+  const { error } = await supabase.from("messages").insert({
+    username: currentUser,
+    content: text,
+  });
 
-function appendMessage(msg, scroll = true) {
-  const container = document.getElementById("messages");
-  const isOwn = msg.username === currentUser || msg.user === currentUser;
-  const username = msg.username || msg.user || msg.sender || "unknown";
-  const text = msg.text || msg.message || msg.content || "";
-  const time = msg.timestamp || msg.createdAt || msg.time || "";
-  const timeStr = time ? new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-
-  const div = document.createElement("div");
-  div.className = `msg${isOwn ? " own" : ""}`;
-  div.innerHTML = `
-    <div class="msg-avatar">${username.charAt(0).toUpperCase()}</div>
-    <div class="msg-content">
-      <div class="msg-meta">
-        <span class="msg-username">${username}</span>
-        <span class="msg-time">${timeStr}</span>
-      </div>
-      <div class="msg-text">${escapeHTML(text)}</div>
-    </div>
-  `;
-  container.appendChild(div);
-  if (scroll) scrollToBottom();
-}
-
-function addSystemMessage(text) {
-  const container = document.getElementById("messages");
-  const div = document.createElement("div");
-  div.className = "system-msg";
-  div.textContent = `— ${text} —`;
-  container.appendChild(div);
-}
+  if (error) console.error("Send failed:", error.message);
+};
 
 // ─────────────────────────────────────────────
-// WEBSOCKET
+// PRESENCE (online users)
 // ─────────────────────────────────────────────
-function connectWebSocket() {
-  try {
-    socket = new WebSocket(token ? `${API.ws}?token=${token}` : API.ws);
+function trackPresence() {
+  presenceChannel = supabase.channel("online-users", {
+    config: { presence: { key: currentUser } },
+  });
 
-    socket.onopen = () => {
-      console.log("WebSocket connected");
-      addSystemMessage("connected to server");
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.type === "message" || data.message || data.text) {
-          const msg = data.message || data;
-          if (msg.username !== currentUser && msg.user !== currentUser) {
-            appendMessage(msg);
-            scrollToBottom();
-          }
-        }
-
-        if (data.type === "online" || data.onlineUsers) {
-          updateOnlineUsers(data.onlineUsers || data.users || []);
-        }
-
-      } catch (e) {
-        console.log("WS message:", event.data);
+  presenceChannel
+    .on("presence", { event: "sync" }, () => {
+      const state = presenceChannel.presenceState();
+      const users = Object.keys(state);
+      updateOnlineUsers(users);
+    })
+    .subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await presenceChannel.track({ username: currentUser, online_at: new Date().toISOString() });
       }
-    };
-
-    socket.onclose = () => {
-      console.log("WebSocket disconnected, falling back to polling");
-    };
-
-    socket.onerror = () => {
-      console.log("WebSocket unavailable, using polling");
-    };
-
-  } catch (e) {
-    console.log("WebSocket not available:", e);
-  }
-}
-
-// ─────────────────────────────────────────────
-// ONLINE USERS
-// ─────────────────────────────────────────────
-async function fetchOnlineUsers() {
-  try {
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const res = await fetch(API.online, { headers });
-    if (!res.ok) return;
-    const data = await res.json();
-    const users = Array.isArray(data) ? data : (data.users || data.onlineUsers || []);
-    updateOnlineUsers(users);
-  } catch (err) {
-    // silently fail — server may not have this endpoint
-  }
+    });
 }
 
 function updateOnlineUsers(users) {
@@ -273,12 +201,36 @@ function updateOnlineUsers(users) {
   const count = document.getElementById("online-count");
   list.innerHTML = "";
   count.textContent = users.length;
-  users.forEach(u => {
-    const name = typeof u === "string" ? u : (u.username || u.name || "?");
+  users.forEach(username => {
     const li = document.createElement("li");
-    li.textContent = name;
+    li.textContent = username;
     list.appendChild(li);
   });
+}
+
+// ─────────────────────────────────────────────
+// RENDER A MESSAGE
+// ─────────────────────────────────────────────
+function appendMessage(msg) {
+  const container = document.getElementById("messages");
+  const isOwn = msg.username === currentUser;
+  const timeStr = msg.created_at
+    ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : "";
+
+  const div = document.createElement("div");
+  div.className = `msg${isOwn ? " own" : ""}`;
+  div.innerHTML = `
+    <div class="msg-avatar">${msg.username.charAt(0).toUpperCase()}</div>
+    <div class="msg-content">
+      <div class="msg-meta">
+        <span class="msg-username">${escapeHTML(msg.username)}</span>
+        <span class="msg-time">${timeStr}</span>
+      </div>
+      <div class="msg-text">${escapeHTML(msg.content)}</div>
+    </div>
+  `;
+  container.appendChild(div);
 }
 
 // ─────────────────────────────────────────────
@@ -295,5 +247,26 @@ function scrollToBottom() {
 }
 
 function escapeHTML(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
+
+// ─────────────────────────────────────────────
+// AUTO-LOGIN if session still active
+// ─────────────────────────────────────────────
+supabase.auth.getSession().then(async ({ data: { session } }) => {
+  if (session) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("username")
+      .eq("id", session.user.id)
+      .single();
+
+    if (profile) {
+      currentUser = profile.username;
+      enterChat();
+    }
+  }
+});
