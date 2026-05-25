@@ -53,7 +53,9 @@
 
   <main id="app-screen" class="screen">
     <aside class="left-rail">
-      <div class="rail-brand">RGD</div>
+      <a class="rail-brand" href="/index.html" aria-label="Go to Royal's Game home">
+        <img src="/RGD-Logo.png" alt="Royal's Game Developers logo" />
+      </a>
       <button id="view-chat" class="rail-btn active" type="button" onclick="setView('chat')">Chat</button>
       <button id="view-war" class="rail-btn" type="button" onclick="setView('war')">War</button>
       <button class="rail-btn logout" type="button" onclick="handleLogout()">Logout</button>
@@ -83,7 +85,7 @@
           <p id="war-status">Loading your kingdom...</p>
         </div>
         <div class="war-actions">
-          <button class="ghost-btn" type="button" onclick="advanceDay()">Next Day</button>
+          <button id="next-day-btn" class="ghost-btn" type="button" onclick="advanceDay()" disabled>Next Day</button>
           <button class="primary-btn" type="button" onclick="saveGame()">Save</button>
         </div>
       </header>
@@ -108,20 +110,18 @@
           <div id="selected-state" class="selected-state"></div>
 
           <div class="control-block">
-            <h3>Buy Resources</h3>
+            <h3>Trade Resources</h3>
             <div class="inline-controls">
               <button type="button" onclick="buyResource('food')">+50 Food $25</button>
               <button type="button" onclick="buyResource('water')">+50 Water $25</button>
+              <button type="button" onclick="sellResource('food')">Sell 50 Food +$20</button>
+              <button type="button" onclick="sellResource('water')">Sell 50 Water +$20</button>
             </div>
           </div>
 
           <div class="control-block">
-            <h3>Recruit</h3>
-            <label>
-              Soldiers to train
-              <input id="recruit-count" type="number" min="1" max="50" value="1" />
-            </label>
-            <button type="button" onclick="recruitSoldiers()">Recruit $20 each</button>
+            <h3>Soldiers</h3>
+            <p class="hint-text">Soldiers cannot be recruited. Each new day has a 1% chance that one person joins your army.</p>
           </div>
 
           <div class="control-block">

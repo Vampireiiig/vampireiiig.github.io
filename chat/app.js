@@ -15,6 +15,21 @@ let ownedStates = [];
 let selectedStateId = null;
 let presenceChannel = null;
 let messageChannel = null;
+let dayTimer = null;
+
+const DAY_LENGTH_MS = 12 * 60 * 60 * 1000;
+const NEXT_DAY_UNLOCK_MS = 6 * 60 * 60 * 1000;
+const FALLBACK_STATES = [
+  { id: "northwatch", name: "Northwatch", x: 1, y: 1, soldiers: 7, soldier_power: 2, money: 60, food: 90, water: 70 },
+  { id: "ironfield", name: "Ironfield", x: 2, y: 1, soldiers: 10, soldier_power: 2, money: 110, food: 80, water: 55 },
+  { id: "sunford", name: "Sunford", x: 3, y: 1, soldiers: 14, soldier_power: 3, money: 130, food: 120, water: 90 },
+  { id: "greenbay", name: "Greenbay", x: 1, y: 2, soldiers: 6, soldier_power: 1, money: 70, food: 160, water: 120 },
+  { id: "crownmere", name: "Crownmere", x: 2, y: 2, soldiers: 18, soldier_power: 4, money: 220, food: 150, water: 150 },
+  { id: "eastvale", name: "Eastvale", x: 3, y: 2, soldiers: 9, soldier_power: 2, money: 90, food: 80, water: 130 },
+  { id: "stonepass", name: "Stonepass", x: 1, y: 3, soldiers: 12, soldier_power: 3, money: 100, food: 65, water: 80 },
+  { id: "riverhold", name: "Riverhold", x: 2, y: 3, soldiers: 8, soldier_power: 2, money: 85, food: 140, water: 170 },
+  { id: "ashridge", name: "Ashridge", x: 3, y: 3, soldiers: 16, soldier_power: 4, money: 190, food: 100, water: 90 },
+];
 
 const $ = (id) => document.getElementById(id);
 
@@ -116,6 +131,7 @@ window.handleSignup = async function() {
 window.handleLogout = async function() {
   if (presenceChannel) await supabase.removeChannel(presenceChannel);
   if (messageChannel) await supabase.removeChannel(messageChannel);
+  if (dayTimer) clearTimeout(dayTimer);
   await supabase.auth.signOut();
   sessionUser = null;
   currentUser = null;
@@ -274,8 +290,13 @@ async function setupGame() {
 
 async function loadStates() {
   const { data, error } = await supabase.from("states").select("*").order("y").order("x");
-  if (error) return console.error(error);
-  allStates = data || [];
+  if (error) {
+    console.error(error);
+    allStates = FALLBACK_STATES;
+    addLog("Using built-in map. Run setup.sql in Supabase if battles fail.");
+    return;
+  }
+  allStates = data?.length ? data : FALLBACK_STATES;
 }
 
 async function loadOrCreatePlayer() {
@@ -287,6 +308,7 @@ async function loadOrCreatePlayer() {
 
   if (data) {
     currentPlayer = data;
+    await fixOldStarterKitIfNeeded();
     return;
   }
 
@@ -300,12 +322,13 @@ async function loadOrCreatePlayer() {
       id: sessionUser.id,
       username: currentUser,
       money: 100,
-      food: 100,
-      water: 100,
+      food: 50,
+      water: 50,
       population: 10,
       soldiers: 3,
       soldier_power: 1,
       day: 1,
+      last_day_at: new Date().toISOString(),
     })
     .select()
     .single();
@@ -323,6 +346,19 @@ async function loadOrCreatePlayer() {
   }
 }
 
+async function fixOldStarterKitIfNeeded() {
+  const looksLikeOldStarter =
+    currentPlayer.day === 1 &&
+    Number(currentPlayer.money) === 100 &&
+    Number(currentPlayer.food) === 100 &&
+    Number(currentPlayer.water) === 100 &&
+    currentPlayer.population === 10 &&
+    currentPlayer.soldiers === 3;
+
+  if (!looksLikeOldStarter) return;
+  await updatePlayer({ food: 50, water: 50 });
+}
+
 async function refreshGame() {
   if (!sessionUser) return;
 
@@ -338,6 +374,7 @@ async function refreshGame() {
   renderStats();
   renderMap();
   renderSelectedState();
+  updateNextDayButton();
 }
 
 function renderStats() {
@@ -403,23 +440,25 @@ window.buyResource = async function(type) {
   addLog(`Bought 50 ${type}.`);
 };
 
-window.recruitSoldiers = async function() {
-  const count = clampNumber($("recruit-count").value, 1, 50);
-  const cost = count * 20;
-
-  if (currentPlayer.money < cost) return addLog("Not enough money to recruit.");
-  if (currentPlayer.population < count) return addLog("Not enough population to recruit.");
-
+window.sellResource = async function(type) {
+  if (Number(currentPlayer[type]) < 50) return addLog(`Not enough ${type} to sell.`);
   await updatePlayer({
-    money: currentPlayer.money - cost,
-    population: currentPlayer.population - count,
-    soldiers: currentPlayer.soldiers + count,
+    [type]: Number(currentPlayer[type]) - 50,
+    money: Number(currentPlayer.money) + 20,
   });
-  addLog(`Recruited ${count} soldier${count === 1 ? "" : "s"}.`);
+  addLog(`Sold 50 ${type} for $20.`);
 };
 
 window.advanceDay = async function() {
+  const elapsed = getDayElapsedMs();
+  if (elapsed < NEXT_DAY_UNLOCK_MS) {
+    addLog(`Next day unlocks in ${formatDuration(NEXT_DAY_UNLOCK_MS - elapsed)}.`);
+    updateNextDayButton();
+    return;
+  }
+
   const popGain = Math.random() < 0.1 ? Math.ceil(currentPlayer.population * 0.1) : 0;
+  const soldierJoin = currentPlayer.population > 1 && Math.random() < 0.01 ? 1 : 0;
   const consumptionRate = 0.8 + Math.random() * 0.5;
   const consumed = Math.ceil(currentPlayer.population * consumptionRate);
 
@@ -432,11 +471,13 @@ window.advanceDay = async function() {
     day: currentPlayer.day + 1,
     food,
     water,
-    population: Math.max(1, currentPlayer.population + popGain - populationLoss),
+    population: Math.max(1, currentPlayer.population + popGain - populationLoss - soldierJoin),
+    soldiers: currentPlayer.soldiers + soldierJoin,
     money: Number(currentPlayer.money) + ownedStates.length * 10,
+    last_day_at: new Date().toISOString(),
   });
 
-  addLog(`Day advanced. Used ${consumed} food and water.${popGain ? ` Population grew by ${popGain}.` : ""}${starving ? " Shortages hurt your population." : ""}`);
+  addLog(`Day advanced. Used ${consumed} food and water.${popGain ? ` Population grew by ${popGain}.` : ""}${soldierJoin ? " One citizen joined the soldiers." : ""}${starving ? " Shortages hurt your population." : ""}`);
 };
 
 window.attackSelectedState = async function() {
@@ -577,6 +618,44 @@ function addLog(text) {
   const p = document.createElement("p");
   p.textContent = text;
   $("battle-log").prepend(p);
+}
+
+function updateNextDayButton() {
+  const button = $("next-day-btn");
+  if (!button || !currentPlayer) return;
+
+  if (dayTimer) clearTimeout(dayTimer);
+
+  const elapsed = getDayElapsedMs();
+  const unlockRemaining = NEXT_DAY_UNLOCK_MS - elapsed;
+  const fullDayRemaining = DAY_LENGTH_MS - elapsed;
+
+  if (unlockRemaining > 0) {
+    button.disabled = true;
+    button.textContent = `Next Day in ${formatDuration(unlockRemaining)}`;
+    $("war-status").textContent = `${currentUser}'s kingdom controls ${ownedStates.length} state${ownedStates.length === 1 ? "" : "s"}. Day is 12 hours.`;
+    dayTimer = setTimeout(updateNextDayButton, 60000);
+    return;
+  }
+
+  button.disabled = false;
+  button.textContent = fullDayRemaining > 0
+    ? `Next Day Available (${formatDuration(fullDayRemaining)} left)`
+    : "Start Next Day";
+  dayTimer = setTimeout(updateNextDayButton, 60000);
+}
+
+function getDayElapsedMs() {
+  const started = currentPlayer?.last_day_at ? new Date(currentPlayer.last_day_at).getTime() : Date.now();
+  return Math.max(0, Date.now() - started);
+}
+
+function formatDuration(ms) {
+  const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
 function scrollToBottom() {

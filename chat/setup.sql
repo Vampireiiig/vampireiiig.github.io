@@ -27,12 +27,13 @@ create table players (
   id uuid references auth.users primary key,
   username text unique not null,
   money numeric default 100,
-  food numeric default 100,
-  water numeric default 100,
+  food numeric default 50,
+  water numeric default 50,
   population integer default 10,
   soldiers integer default 3,
   soldier_power numeric default 1,
   day integer default 1,
+  last_day_at timestamp default now(),
   updated_at timestamp default now()
 );
 
