@@ -3,237 +3,92 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RGD War Chat</title>
+  <title>RGD Chat</title>
   <link rel="stylesheet" href="style.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </head>
 <body>
-  <main id="auth-screen" class="screen active">
-    <section class="auth-panel">
-      <div class="brand">
-        <a class="brand-mark" href="/index.html" aria-label="Go to Royal's Game home">
-          <img src="/RGD-Logo.png" alt="Royal's Game Developers logo" />
-        </a>
-        <div>
-          <h1>Royal's War</h1>
-          <p>Sign in, chat, and conquer the map.</p>
-        </div>
+
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-bg">
+      <div class="grid-overlay"></div>
+      <div class="glow-orb orb1"></div>
+      <div class="glow-orb orb2"></div>
+    </div>
+    <div class="auth-box">
+      <div class="auth-logo">
+        <span class="logo-bracket">[</span>RGD<span class="logo-bracket">]</span>
       </div>
+      <p class="auth-subtitle">ROYAL'S GAME DEV — CHAT</p>
 
       <div class="tab-row">
-        <button id="tab-login" class="tab-btn active" type="button" onclick="switchTab('login')">Login</button>
-        <button id="tab-signup" class="tab-btn" type="button" onclick="switchTab('signup')">Sign up</button>
+        <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">LOGIN</button>
+        <button class="tab-btn" id="tab-signup" onclick="switchTab('signup')">SIGN UP</button>
       </div>
 
-      <form id="form-login" class="auth-form" onsubmit="event.preventDefault(); handleLogin();">
-        <label>
-          Username
-          <input id="login-username" type="text" autocomplete="username" placeholder="your username" />
-        </label>
-        <label>
-          Password
-          <input id="login-password" type="password" autocomplete="current-password" placeholder="password" />
-        </label>
-        <p id="login-error" class="error-msg"></p>
-        <button class="primary-btn" type="submit">Login</button>
-      </form>
-
-      <form id="form-signup" class="auth-form hidden" onsubmit="event.preventDefault(); handleSignup();">
-        <label>
-          Username
-          <input id="signup-username" type="text" autocomplete="username" placeholder="letters, numbers, underscore" />
-        </label>
-        <label>
-          Password
-          <input id="signup-password" type="password" autocomplete="new-password" placeholder="at least 6 characters" />
-        </label>
-        <p id="signup-error" class="error-msg"></p>
-        <button class="primary-btn" type="submit">Create Account</button>
-      </form>
-    </section>
-  </main>
-
-  <main id="app-screen" class="screen">
-    <button id="sidebar-toggle" class="sidebar-toggle" type="button" onclick="toggleSidebar()">Menu</button>
-    <aside id="left-rail" class="left-rail">
-      <a class="rail-brand" href="/index.html" aria-label="Go to Royal's Game home">
-        <img src="/RGD-Logo.png" alt="Royal's Game Developers logo" />
-      </a>
-      <button id="view-chat" class="rail-btn active" type="button" onclick="setView('chat')">Chat</button>
-      <button id="view-war" class="rail-btn" type="button" onclick="setView('war')">War</button>
-      <button class="rail-btn logout" type="button" onclick="handleLogout()">Logout</button>
-    </aside>
-
-    <section id="chat-view" class="view active">
-      <header class="top-bar">
-        <div>
-          <h2>Global Chat</h2>
-          <p><span id="online-count">0</span> online</p>
+      <!-- LOGIN FORM -->
+      <div id="form-login" class="auth-form">
+        <div class="input-group">
+          <label>USERNAME</label>
+          <input type="text" id="login-username" placeholder="enter username" autocomplete="off" onkeydown="if(event.key==='Enter') handleLogin()" />
         </div>
-        <ul id="online-list" class="online-list"></ul>
-      </header>
-
-      <div id="messages" class="messages"></div>
-
-      <form class="message-form" onsubmit="event.preventDefault(); sendMessage();">
-        <input id="msg-input" type="text" autocomplete="off" placeholder="Message the realm..." />
-        <button class="primary-btn" type="submit">Send</button>
-      </form>
-    </section>
-
-    <section id="war-view" class="view">
-      <header class="top-bar">
-        <div>
-          <h2>Conquest Map</h2>
-          <p id="war-status">Loading your kingdom...</p>
+        <div class="input-group">
+          <label>PASSWORD</label>
+          <input type="password" id="login-password" placeholder="••••••••" onkeydown="if(event.key==='Enter') handleLogin()" />
         </div>
-        <div class="war-actions">
-          <button id="next-day-btn" class="ghost-btn" type="button" onclick="advanceDay()" disabled>Next Day</button>
-          <button class="ghost-btn" type="button" onclick="toggleTutorial()">Tutorial</button>
-          <button class="primary-btn" type="button" onclick="saveGame()">Save</button>
-        </div>
-      </header>
-
-      <div class="war-layout">
-        <section class="map-panel">
-          <div class="map-toolbar">
-            <button type="button" onclick="zoomMap(-0.15)">-</button>
-            <span id="zoom-label">100%</span>
-            <button type="button" onclick="zoomMap(0.15)">+</button>
-            <button type="button" onclick="resetMapView()">Reset</button>
-          </div>
-          <div id="map-viewport" class="map-viewport">
-            <div id="map-grid" class="map-grid"></div>
-          </div>
-        </section>
-
-        <aside class="war-panel">
-          <div class="stat-grid">
-            <div><span>Money</span><strong id="stat-money">$0</strong></div>
-            <div><span>Food</span><strong id="stat-food">0</strong></div>
-            <div><span>Water</span><strong id="stat-water">0</strong></div>
-            <div><span>Population</span><strong id="stat-population">0</strong></div>
-            <div><span>Soldiers</span><strong id="stat-soldiers">0</strong></div>
-            <div><span>Avg Power</span><strong id="stat-power">0</strong></div>
-            <div><span>Land</span><strong id="stat-land">0</strong></div>
-            <div><span>Day</span><strong id="stat-day">1</strong></div>
-            <div><span>Oil Rigs</span><strong id="stat-oil">0</strong></div>
-          </div>
-
-          <div id="selected-state" class="selected-state"></div>
-
-          <div class="control-block">
-            <h3>Trade Resources</h3>
-            <div class="inline-controls">
-              <button type="button" onclick="buyResource('food')">+50 Food $25</button>
-              <button type="button" onclick="buyResource('water')">+50 Water $25</button>
-              <button type="button" onclick="sellResource('food')">Sell 50 Food +$20</button>
-              <button type="button" onclick="sellResource('water')">Sell 50 Water +$20</button>
-            </div>
-          </div>
-
-          <div class="control-block">
-            <h3>Soldiers</h3>
-            <p class="hint-text">Soldiers cannot be recruited. Each new day has a 1% chance that one person joins your army.</p>
-          </div>
-
-          <div class="control-block">
-            <h3>Rename State</h3>
-            <label>
-              New name
-              <input id="rename-state-input" type="text" maxlength="28" placeholder="owned states only" />
-            </label>
-            <button type="button" onclick="renameSelectedState()">Rename Owned State</button>
-          </div>
-
-          <div class="control-block">
-            <h3>Oil Rig</h3>
-            <p id="oil-rig-info" class="hint-text">Select an owned state.</p>
-            <button type="button" onclick="beginPlaceRigMode()">Place New Oil Rig $1000</button>
-            <button type="button" onclick="upgradeSelectedRig()">Upgrade Selected Rig $500</button>
-            <button type="button" onclick="maintainOilRigs()">Maintain Oil Rigs $100</button>
-          </div>
-
-          <div class="control-block">
-            <h3>State Borders</h3>
-            <p id="border-mode-info" class="hint-text">Select an owned state, then edit its borders tile by tile.</p>
-            <button type="button" onclick="toggleBorderEditMode()">Toggle Border Edit</button>
-            <button type="button" onclick="assignSelectedTilesToCurrentState()">Move Selected Tiles Here</button>
-            <label>
-              New state name
-              <input id="new-state-name" type="text" maxlength="28" placeholder="new district name" />
-            </label>
-            <button type="button" onclick="createStateFromSelection()">Create State From Selected Tiles</button>
-            <button type="button" onclick="clearTileSelection()">Clear Tile Selection</button>
-          </div>
-
-          <div class="control-block">
-            <h3>Move Soldiers</h3>
-            <label>
-              Soldiers to station
-              <input id="move-count" type="number" min="1" value="1" />
-            </label>
-            <button type="button" onclick="moveSoldiersToSelectedState()">Move to Owned State</button>
-          </div>
-
-          <div class="control-block">
-            <h3>Attack</h3>
-            <label>
-              Soldiers to send
-              <input id="attack-count" type="number" min="1" value="1" />
-            </label>
-            <button class="danger-btn" type="button" onclick="attackSelectedState()">Attack Selected State</button>
-          </div>
-
-          <div class="control-block">
-            <h3>Battle Log</h3>
-            <div id="battle-log" class="battle-log"></div>
-          </div>
-        </aside>
+        <div id="login-error" class="error-msg"></div>
+        <button class="submit-btn" onclick="handleLogin()"><span>LOGIN</span></button>
       </div>
 
-      <section class="trade-dock">
-        <div class="trade-maker">
-          <h3>Make Trade Offer</h3>
-          <div class="trade-grid">
-            <label>To player <select id="trade-player"></select></label>
-            <label>Offer money <input id="offer-money" type="number" min="0" value="0" /></label>
-            <label>Offer food <input id="offer-food" type="number" min="0" value="0" /></label>
-            <label>Offer water <input id="offer-water" type="number" min="0" value="0" /></label>
-            <label>Offer soldiers <input id="offer-soldiers" type="number" min="0" value="0" /></label>
-            <label>Offer population <input id="offer-population" type="number" min="0" value="0" /></label>
-            <label>Offer oil rigs <input id="offer-oil-rigs" type="number" min="0" value="0" /></label>
-            <label>Ask money <input id="ask-money" type="number" min="0" value="0" /></label>
-            <label>Ask food <input id="ask-food" type="number" min="0" value="0" /></label>
-            <label>Ask water <input id="ask-water" type="number" min="0" value="0" /></label>
-            <label>Ask soldiers <input id="ask-soldiers" type="number" min="0" value="0" /></label>
-            <label>Ask population <input id="ask-population" type="number" min="0" value="0" /></label>
-            <label>Ask oil rigs <input id="ask-oil-rigs" type="number" min="0" value="0" /></label>
-          </div>
-          <button class="primary-btn" type="button" onclick="createTradeOffer()">Send Trade Offer</button>
+      <!-- SIGNUP FORM — no email field -->
+      <div id="form-signup" class="auth-form hidden">
+        <div class="input-group">
+          <label>USERNAME</label>
+          <input type="text" id="signup-username" placeholder="choose a username" autocomplete="off" onkeydown="if(event.key==='Enter') handleSignup()" />
         </div>
-
-        <div class="trade-list-wrap">
-          <h3>Trade Offers</h3>
-          <div id="trade-list" class="trade-list"></div>
+        <div class="input-group">
+          <label>PASSWORD</label>
+          <input type="password" id="signup-password" placeholder="min. 6 characters" onkeydown="if(event.key==='Enter') handleSignup()" />
         </div>
-      </section>
-    </section>
-  </main>
-
-  <section id="tutorial-modal" class="tutorial-modal hidden">
-    <div class="tutorial-card">
-      <button class="close-tutorial" type="button" onclick="toggleTutorial()">Close</button>
-      <h2>Royal's War Tutorial</h2>
-      <p><strong>Chat:</strong> use Global Chat to talk with online players. You can delete your own messages.</p>
-      <p><strong>Map:</strong> drag the map to move around and use the zoom buttons or mouse wheel to zoom. Click a state to inspect it.</p>
-      <p><strong>Land:</strong> attack enemy states with soldiers. Winning captures the state and its resources.</p>
-      <p><strong>Days:</strong> one day lasts 12 hours. You can manually advance after 6 hours. Population may grow, food/water are consumed, and there is a 1% chance one person joins your soldiers.</p>
-      <p><strong>Oil rigs:</strong> build for $1000, upgrade for $500 up to level 5. Each level pays $10 every random 35-70 minutes, with offline income capped at 50 hours.</p>
-      <p><strong>Maintenance:</strong> oil rigs need $100 maintenance every 7 days. If overdue, every harvest can fail. Failure starts at 10% and rises by 2% each overdue harvest attempt until you maintain the rigs.</p>
-      <p><strong>Trading:</strong> trade money, food, water, soldiers, population, and oil rigs with other players.</p>
+        <div id="signup-error" class="error-msg"></div>
+        <button class="submit-btn" onclick="handleSignup()"><span>CREATE ACCOUNT</span></button>
+      </div>
     </div>
-  </section>
+  </div>
+
+  <!-- CHAT SCREEN -->
+  <div id="chat-screen" class="screen">
+    <div class="chat-bg"><div class="grid-overlay"></div></div>
+
+    <header class="chat-header">
+      <div class="header-left">
+        <span class="logo-small">[RGD]</span>
+        <span class="channel-name">#general</span>
+      </div>
+      <div class="header-right">
+        <div class="online-indicator">
+          <span class="online-dot"></span>
+          <span id="online-count">0</span> online
+        </div>
+        <button class="logout-btn" onclick="handleLogout()">LOGOUT</button>
+      </div>
+    </header>
+
+    <div class="chat-body">
+      <div class="online-sidebar">
+        <div class="sidebar-title">ONLINE</div>
+        <ul id="online-list"></ul>
+      </div>
+      <div class="chat-main">
+        <div id="messages" class="messages"></div>
+        <div class="input-bar">
+          <input type="text" id="msg-input" placeholder="send a message..." autocomplete="off" onkeydown="if(event.key==='Enter') sendMessage()" />
+          <button class="send-btn" onclick="sendMessage()">SEND</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>
