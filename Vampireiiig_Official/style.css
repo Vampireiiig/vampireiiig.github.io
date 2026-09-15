@@ -5,7 +5,7 @@ html{
     color: #00ffc3;
     background-color: rgb(0, 0, 25);
 }
- .navbar {
+ .页眉块 {
     position: fixed;
     top: 0;
     right: 0;
@@ -19,28 +19,28 @@ html{
     align-items: center;
     z-index: 1000;
 }
- .navbar .logo {
+ .页眉块 .logo {
     font-size: 1.5em;
     font-weight: 500;
     font-variation-settings: 'wght' 500
 }
-.navbar .links {
+.页眉块 .links {
     display: flex;
     gap: 15px;
 }
-.navbar a {
+.页眉块 a {
     color: white;
     text-decoration: none;
     margin: 0 15px;
 }
-.navbar a:hover {
+.页眉块 a:hover {
     text-decoration: underline;
 }
 body {
     margin: 0;
     padding-top: 50px;
  }
-.watermark {
+.水印 {
     position: fixed;
     bottom: 10px;
     right: 10px;
@@ -55,7 +55,52 @@ body {
     margin-right: -100px;
     border-radius: 10px;
 }
-.watermark img {
+.播放列表{
+    color:#00ffc3
+}
+.视频包含{
+    color: rgb(240,240,255);
+    background-color: rgba(15, 15, 50, 1);
+    border-radius: 15px;
+    padding: 10px;
+    margin: 20px;
+    border-color: rgba(255, 255, 255, 1);
+    border-width: 8px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+    flex: 1 1 200px; /* grow, shrink, base 200px */
+    min-width: 200px;
+    max-width: 400px;
+}
+.缩略图{
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    margin-bottom: 10px;
+}
+.视频容器 {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 10px; /* optional spacing inside container */
+}
+.视频容器 {
+display: flex;
+flex-wrap: wrap;
+gap: 16px;
+justify-content: flex-start;
+}
+.视频包含 img{
+    max-width: 380px;
+    height: auto;
+    border-radius: 10px;
+}
+.水印 img {
     width: 20px;
     height: 20px;
     margin-left: 5px;
